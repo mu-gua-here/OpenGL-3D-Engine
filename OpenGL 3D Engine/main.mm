@@ -2,7 +2,7 @@
 //  main.mm
 //  OpenGL Test
 //
-//  Created by Ray Hsiao Muguang on 2025/6/20.
+//  Created by mu_gua_here on 2025/6/20.
 //
 
 #define GL_SILENCE_DEPRECATION
@@ -21,7 +21,12 @@ void framebuffer_size_callback(GLFWwindow* window, int width, int height);
 // ============================================================================
 // GLOBAL VARIABLES
 // ============================================================================
+
+// Runtime
 bool paused = false;
+
+// Engine
+int entity_count = 0;
 
 // ============================================================================
 // MATH LIBRARY (Vector and Matrix operations)
@@ -71,9 +76,9 @@ float vec3_dot(Vec3 a, Vec3 b) {
 // Matrix multiplication
 Mat4 mat4_multiply(Mat4 a, Mat4 b) {
     Mat4 result = {0};
-    for (int i = 0; i < 4; i++) { // Row of result
-        for (int j = 0; j < 4; j++) { // Column of result
-            for (int k = 0; k < 4; k++) { // Element of row/column
+    for (int i = 0; i < 4; i++) {
+        for (int j = 0; j < 4; j++) {
+            for (int k = 0; k < 4; k++) {
                 result.m[i + j * 4] += a.m[i + k * 4] * b.m[k + j * 4];
             }
         }
@@ -148,7 +153,7 @@ Mat4 mat4_scale(Vec3 scale) {
     return m;
 }
 
-// LookAt matrix (more robust view matrix)
+// LookAt matrix
 Mat4 mat4_look_at(Vec3 eye, Vec3 center, Vec3 up) {
     Vec3 f = vec3_normalize(vec3_sub(center, eye)); // Forward vector
     Vec3 s = vec3_normalize(vec3_cross(f, up));      // Side vector
@@ -219,7 +224,7 @@ Mesh create_cube() {
     mesh.vertex_count = 8;
     mesh.index_count = 36;
 
-    // Setup OpenGL buffers
+    // OpenGL buffers
     glGenVertexArrays(1, &mesh.VAO);
     glGenBuffers(1, &mesh.VBO);
     glGenBuffers(1, &mesh.EBO);
@@ -244,8 +249,6 @@ Mesh create_cube() {
 // ============================================================================
 // ENTITY SYSTEM (Game objects in 3D space)
 // ============================================================================
-
-int entity_count = 0;
 
 typedef struct {
     Vec3 position;
@@ -349,7 +352,7 @@ const char* vertex_shader_3d = "#version 330 core\n"
 const char* fragment_shader_3d = "#version 330 core\n"
     "out vec4 FragColor;\n"
     "void main() {\n"
-    "   FragColor = vec4(0.8f, 0.4f, 0.2f, 1.0f);\n" // Orange-ish color
+    "   FragColor = vec4(0.8f, 0.4f, 0.2f, 1.0f);\n"
     "}\0";
 
 Shader create_shader() {
