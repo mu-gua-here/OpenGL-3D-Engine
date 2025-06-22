@@ -6,8 +6,21 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		71C0BF3E2E07F94600B289E6 /* OpenGL.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 71C0BF3D2E07F94600B289E6 /* OpenGL.framework */; };
+		71C0BF402E07F95A00B289E6 /* libglfw.3.4.dylib in Frameworks */ = {isa = PBXBuildFile; fileRef = 71C0BF3F2E07F95A00B289E6 /* libglfw.3.4.dylib */; };
+		71C0BF422E07F97700B289E6 /* Cocoa.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 71C0BF412E07F97700B289E6 /* Cocoa.framework */; };
+		71C0BF442E07F98000B289E6 /* IOKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 71C0BF432E07F98000B289E6 /* IOKit.framework */; };
+		71C0BF462E07F99400B289E6 /* CoreVideo.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 71C0BF452E07F99400B289E6 /* CoreVideo.framework */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXFileReference section */
 		71C0BF242E07F8AC00B289E6 /* OpenGL 3D Engine.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "OpenGL 3D Engine.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		71C0BF3D2E07F94600B289E6 /* OpenGL.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = OpenGL.framework; path = System/Library/Frameworks/OpenGL.framework; sourceTree = SDKROOT; };
+		71C0BF3F2E07F95A00B289E6 /* libglfw.3.4.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; name = libglfw.3.4.dylib; path = ../../../../opt/homebrew/Cellar/glfw/3.4/lib/libglfw.3.4.dylib; sourceTree = "<group>"; };
+		71C0BF412E07F97700B289E6 /* Cocoa.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Cocoa.framework; path = System/Library/Frameworks/Cocoa.framework; sourceTree = SDKROOT; };
+		71C0BF432E07F98000B289E6 /* IOKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = IOKit.framework; path = System/Library/Frameworks/IOKit.framework; sourceTree = SDKROOT; };
+		71C0BF452E07F99400B289E6 /* CoreVideo.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreVideo.framework; path = System/Library/Frameworks/CoreVideo.framework; sourceTree = SDKROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -23,6 +36,11 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				71C0BF462E07F99400B289E6 /* CoreVideo.framework in Frameworks */,
+				71C0BF442E07F98000B289E6 /* IOKit.framework in Frameworks */,
+				71C0BF422E07F97700B289E6 /* Cocoa.framework in Frameworks */,
+				71C0BF3E2E07F94600B289E6 /* OpenGL.framework in Frameworks */,
+				71C0BF402E07F95A00B289E6 /* libglfw.3.4.dylib in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -33,6 +51,7 @@
 			isa = PBXGroup;
 			children = (
 				71C0BF262E07F8AC00B289E6 /* OpenGL 3D Engine */,
+				71C0BF3C2E07F94600B289E6 /* Frameworks */,
 				71C0BF252E07F8AC00B289E6 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -43,6 +62,18 @@
 				71C0BF242E07F8AC00B289E6 /* OpenGL 3D Engine.app */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		71C0BF3C2E07F94600B289E6 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				71C0BF452E07F99400B289E6 /* CoreVideo.framework */,
+				71C0BF432E07F98000B289E6 /* IOKit.framework */,
+				71C0BF412E07F97700B289E6 /* Cocoa.framework */,
+				71C0BF3F2E07F95A00B289E6 /* libglfw.3.4.dylib */,
+				71C0BF3D2E07F94600B289E6 /* OpenGL.framework */,
+			);
+			name = Frameworks;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -249,6 +280,7 @@
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
+				"HEADER_SEARCH_PATHS[arch=*]" = /opt/homebrew/opt/glfw/include;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_NSMainStoryboardFile = Main;
 				INFOPLIST_KEY_NSPrincipalClass = NSApplication;
@@ -256,6 +288,11 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
+				LIBRARY_SEARCH_PATHS = (
+					"$(inherited)",
+					/opt/homebrew/Cellar/glfw/3.4/lib,
+				);
+				"LIBRARY_SEARCH_PATHS[arch=*]" = /opt/homebrew/opt/glfw/lib;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "mu-gua-here.OpenGL-3D-Engine";
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -274,6 +311,7 @@
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
+				"HEADER_SEARCH_PATHS[arch=*]" = /opt/homebrew/opt/glfw/include;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_NSMainStoryboardFile = Main;
 				INFOPLIST_KEY_NSPrincipalClass = NSApplication;
@@ -281,6 +319,11 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
+				LIBRARY_SEARCH_PATHS = (
+					"$(inherited)",
+					/opt/homebrew/Cellar/glfw/3.4/lib,
+				);
+				"LIBRARY_SEARCH_PATHS[arch=*]" = /opt/homebrew/opt/glfw/lib;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "mu-gua-here.OpenGL-3D-Engine";
 				PRODUCT_NAME = "$(TARGET_NAME)";
