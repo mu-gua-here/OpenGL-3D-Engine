@@ -15,7 +15,6 @@
 
 // --- Function Prototypes ---
 void mouse_callback(GLFWwindow* window, double xpos, double ypos);
-void processInput(GLFWwindow *window);
 void framebuffer_size_callback(GLFWwindow* window, int width, int height);
 
 // ============================================================================
@@ -29,7 +28,7 @@ bool paused = false;
 int entity_count = 0;
 
 // ============================================================================
-// MATH LIBRARY (Vector and Matrix operations)
+// MATH LIBRARY
 // ============================================================================
 
 typedef struct {
@@ -86,14 +85,14 @@ Mat4 mat4_multiply(Mat4 a, Mat4 b) {
     return result;
 }
 
-// Create identity matrix
+// Identity matrix
 Mat4 mat4_identity() {
     Mat4 m = {0};
     m.m[0] = m.m[5] = m.m[10] = m.m[15] = 1.0f;
     return m;
 }
 
-// Create perspective projection matrix
+// Perspective projection matrix
 Mat4 mat4_perspective(float fov, float aspect, float near, float far) {
     Mat4 m = {0};
     float f = 1.0f / tanf(fov * 0.5f);
@@ -105,7 +104,7 @@ Mat4 mat4_perspective(float fov, float aspect, float near, float far) {
     return m;
 }
 
-// Create translation matrix
+// Translation matrix
 Mat4 mat4_translate(Vec3 pos) {
     Mat4 m = mat4_identity();
     m.m[12] = pos.x;
@@ -114,7 +113,7 @@ Mat4 mat4_translate(Vec3 pos) {
     return m;
 }
 
-// Create rotation matrix around X axis (pitch)
+// Rotation matrix around X axis (pitch)
 Mat4 mat4_rotate_x(float angle) {
     Mat4 m = mat4_identity();
     float c = cosf(angle);
@@ -124,7 +123,7 @@ Mat4 mat4_rotate_x(float angle) {
     return m;
 }
 
-// Create rotation matrix around Y axis (yaw)
+// Rotation matrix around Y axis (yaw)
 Mat4 mat4_rotate_y(float angle) {
     Mat4 m = mat4_identity();
     float c = cosf(angle);
@@ -134,7 +133,7 @@ Mat4 mat4_rotate_y(float angle) {
     return m;
 }
 
-// Create rotation matrix around Z axis (roll)
+// Rotation matrix around Z axis (roll)
 Mat4 mat4_rotate_z(float angle) {
     Mat4 m = mat4_identity();
     float c = cosf(angle);
@@ -192,15 +191,15 @@ Mesh create_cube() {
     static float cube_vertices[] = {
         // positions (3 floats)
         // Front face
-        -0.5f, -0.5f,  0.5f,  // 0: Bottom left
-         0.5f, -0.5f,  0.5f,  // 1: Bottom right
-         0.5f,  0.5f,  0.5f,  // 2: Top right
-        -0.5f,  0.5f,  0.5f,  // 3: Top left
+        -0.5f, -0.5f,  0.5f, // 0: Bottom left
+         0.5f, -0.5f,  0.5f, // 1: Bottom right
+         0.5f,  0.5f,  0.5f, // 2: Top right
+        -0.5f,  0.5f,  0.5f, // 3: Top left
         // Back face
-        -0.5f, -0.5f, -0.5f,  // 4: Bottom left
-         0.5f, -0.5f, -0.5f,  // 5: Bottom right
-         0.5f,  0.5f, -0.5f,  // 6: Top right
-        -0.5f,  0.5f, -0.5f   // 7: Top left
+        -0.5f, -0.5f, -0.5f, // 4: Bottom left
+         0.5f, -0.5f, -0.5f, // 5: Bottom right
+         0.5f,  0.5f, -0.5f, // 6: Top right
+        -0.5f,  0.5f, -0.5f  // 7: Top left
     };
 
     static unsigned int cube_indices[] = {
@@ -224,7 +223,7 @@ Mesh create_cube() {
     mesh.vertex_count = 8;
     mesh.index_count = 36;
 
-    // OpenGL buffers
+    // Buffers
     glGenVertexArrays(1, &mesh.VAO);
     glGenBuffers(1, &mesh.VBO);
     glGenBuffers(1, &mesh.EBO);
@@ -479,7 +478,7 @@ int main() {
     // Set callbacks
     glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
     glfwSetCursorPosCallback(window, mouse_callback);
-    glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED); // Enable pointer lock
+    glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
 
     // Initialize renderer (which also initializes the global_camera)
     Renderer renderer;
@@ -506,6 +505,9 @@ int main() {
         if (paused == false) {
             // Keyboard input for camera movement
             float camera_speed = 0.05f;
+            if (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS) {
+                camera_speed *= 2;
+            }
             if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) {
                 global_camera.position = vec3_add(global_camera.position, vec3_scale(global_camera.front, camera_speed));
             }
@@ -518,14 +520,14 @@ int main() {
             if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) {
                 global_camera.position = vec3_add(global_camera.position, vec3_scale(global_camera.right, camera_speed));
             }
-            if (glfwGetKey(window, GLFW_KEY_E) == GLFW_PRESS) { // Move up (world Y)
+            if (glfwGetKey(window, GLFW_KEY_E) == GLFW_PRESS) {
                 global_camera.position.y += camera_speed;
             }
-            if (glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS) { // Move down (world Y)
+            if (glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS) {
                 global_camera.position.y -= camera_speed;
             }
             
-            // Update entities (rotate them)
+            // Update entities
             float time = glfwGetTime();
             entities[0].rotation.x = time * 0.5f;
             entities[1].rotation.y = time * 1.0f;
@@ -546,13 +548,13 @@ int main() {
         if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS) {
             if (glfwGetInputMode(window, GLFW_CURSOR) == GLFW_CURSOR_DISABLED) {
                 paused = true;
-                glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+                glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL); // Disable pointerlock
             }
         }
         if (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT)) {
             if (glfwGetInputMode(window, GLFW_CURSOR) == GLFW_CURSOR_NORMAL) {
                 paused = false;
-                glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+                glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED); // Enable pointerlock
             }
         }
     }
@@ -571,12 +573,8 @@ void mouse_callback(GLFWwindow* window, double xpos, double ypos) {
     static double lastX = 400.0;
     static double lastY = 300.0;
     static bool firstMouse = true; // Flag to handle the initial jump when pointer lock starts
-    if (glfwGetInputMode(window, GLFW_CURSOR) != GLFW_CURSOR_DISABLED) {
-        lastX = xpos;
-        lastY = ypos;
-        firstMouse = false;
-        return;
-    }
+    
+    if (glfwGetInputMode(window, GLFW_CURSOR) != GLFW_CURSOR_DISABLED) return;
 
     if (firstMouse) {
         lastX = xpos;
@@ -618,7 +616,7 @@ void framebuffer_size_callback(GLFWwindow* window, int width, int height) {
     // Adjust the OpenGL viewport to match the new window dimensions
     glViewport(0, 0, width, height);
 
-    // Update the camera's aspect ratio to reflect the new window size
+    // Update camera aspect ratio
     if (height > 0) {
         global_camera.aspect_ratio = (float)width / (float)height;
     }
