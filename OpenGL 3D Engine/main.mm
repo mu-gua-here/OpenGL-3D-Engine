@@ -2,7 +2,7 @@
 //  main.mm
 //  OpenGL Test
 //
-//  Created by mu_gua_here on 2025/6/20.
+//  Created by Ray Hsiao Muguang on 2025/6/20.
 //
 
 #define GL_SILENCE_DEPRECATION
@@ -12,6 +12,8 @@
 #include <stdlib.h>
 #include <math.h>
 #include <cmath>
+#include <iostream>
+#include "stb_image.h"
 
 // --- Function Prototypes ---
 void mouse_callback(GLFWwindow* window, double xpos, double ypos);
@@ -26,6 +28,58 @@ bool paused = false;
 
 // Engine
 int entity_count = 0;
+
+// ============================================================================
+// LOAD TEXTURES
+// ============================================================================
+
+GLuint loadTexture(const char* path) {
+    int width, height, channels;
+    
+    // Load image data
+    unsigned char* data = stbi_load(path, &width, &height, &channels, 0);
+    if (!data) {
+        std::cerr << "Failed to load texture: " << path << std::endl;
+        return 0;
+    }
+    
+    // Generate OpenGL texture
+    GLuint textureID;
+    glGenTextures(1, &textureID);
+    glBindTexture(GL_TEXTURE_2D, textureID);
+    
+    // Set texture parameters
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    
+    // Upload texture data
+    GLenum format;
+    if (channels == 1) format = GL_RED;
+    else if (channels == 3) format = GL_RGB;
+    else if (channels == 4) format = GL_RGBA;
+    else {
+        printf("Invalid color channel format");
+        format = NULL;
+    }
+    
+    glTexImage2D(GL_TEXTURE_2D, 0, format, width, height, 0, format, GL_UNSIGNED_BYTE, data);
+    glGenerateMipmap(GL_TEXTURE_2D);
+    
+    // Clean up
+    stbi_image_free(data);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    
+    return textureID;
+}
+
+// Load texture during setup/initialization
+GLuint global_texture = 0;
+
+void load_all_textures() {
+    global_texture = loadTexture("container.jpg");
+}
 
 // ============================================================================
 // MATH LIBRARY
@@ -189,32 +243,58 @@ typedef struct {
 // Create a cube mesh
 Mesh create_cube() {
     static float cube_vertices[] = {
-        // positions (3 floats)
+        // Positions          Colors                   Texture coords
         // Front face
-        -0.5f, -0.5f,  0.5f, // 0: Bottom left
-         0.5f, -0.5f,  0.5f, // 1: Bottom right
-         0.5f,  0.5f,  0.5f, // 2: Top right
-        -0.5f,  0.5f,  0.5f, // 3: Top left
+        -0.5f, -0.5f,  0.5f,  1.0f, 1.0f, 1.0f, 1.0f,  0.0f, 0.0f,
+         0.5f, -0.5f,  0.5f,  1.0f, 1.0f, 1.0f, 1.0f,  1.0f, 0.0f,
+         0.5f,  0.5f,  0.5f,  1.0f, 1.0f, 1.0f, 1.0f,  1.0f, 1.0f,
+        -0.5f,  0.5f,  0.5f,  1.0f, 1.0f, 1.0f, 1.0f,  0.0f, 1.0f,
+
         // Back face
-        -0.5f, -0.5f, -0.5f, // 4: Bottom left
-         0.5f, -0.5f, -0.5f, // 5: Bottom right
-         0.5f,  0.5f, -0.5f, // 6: Top right
-        -0.5f,  0.5f, -0.5f  // 7: Top left
+        -0.5f, -0.5f, -0.5f,  1.0f, 0.0f, 0.0f, 1.0f,  1.0f, 0.0f,
+         0.5f, -0.5f, -0.5f,  1.0f, 0.0f, 0.0f, 1.0f,  0.0f, 0.0f,
+         0.5f,  0.5f, -0.5f,  1.0f, 0.0f, 0.0f, 1.0f,  0.0f, 1.0f,
+        -0.5f,  0.5f, -0.5f,  1.0f, 0.0f, 0.0f, 1.0f,  1.0f, 1.0f,
+
+        // Left face
+        -0.5f,  0.5f,  0.5f,  0.0f, 1.0f, 0.0f, 1.0f,  1.0f, 0.0f,
+        -0.5f,  0.5f, -0.5f,  0.0f, 1.0f, 0.0f, 1.0f,  1.0f, 1.0f,
+        -0.5f, -0.5f, -0.5f,  0.0f, 1.0f, 0.0f, 1.0f,  0.0f, 1.0f,
+        -0.5f, -0.5f,  0.5f,  0.0f, 1.0f, 0.0f, 1.0f,  0.0f, 0.0f,
+
+        // Right face
+         0.5f,  0.5f,  0.5f,  1.0f, 1.0f, 0.0f, 1.0f,  1.0f, 0.0f,
+         0.5f,  0.5f, -0.5f,  1.0f, 1.0f, 0.0f, 1.0f,  1.0f, 1.0f,
+         0.5f, -0.5f, -0.5f,  1.0f, 1.0f, 0.0f, 1.0f,  0.0f, 1.0f,
+         0.5f, -0.5f,  0.5f,  1.0f, 1.0f, 0.0f, 1.0f,  0.0f, 0.0f,
+
+        // Bottom face
+        -0.5f, -0.5f, -0.5f,  0.0f, 0.0f, 1.0f, 1.0f,  0.0f, 1.0f,
+         0.5f, -0.5f, -0.5f,  0.0f, 0.0f, 1.0f, 1.0f,  1.0f, 1.0f,
+         0.5f, -0.5f,  0.5f,  0.0f, 0.0f, 1.0f, 1.0f,  1.0f, 0.0f,
+        -0.5f, -0.5f,  0.5f,  0.0f, 0.0f, 1.0f, 1.0f,  0.0f, 0.0f,
+
+        // Top face
+        -0.5f,  0.5f, -0.5f,  1.0f, 0.0f, 1.0f, 1.0f,  0.0f, 1.0f,
+         0.5f,  0.5f, -0.5f,  1.0f, 0.0f, 1.0f, 1.0f,  1.0f, 1.0f,
+         0.5f,  0.5f,  0.5f,  1.0f, 0.0f, 1.0f, 1.0f,  1.0f, 0.0f,
+        -0.5f,  0.5f,  0.5f,  1.0f, 0.0f, 1.0f, 1.0f,  0.0f, 0.0f
     };
 
+    // Indices array for 24 vertices
     static unsigned int cube_indices[] = {
         // Front face
-        0, 1, 2,  2, 3, 0,
+        0, 1, 2, 2, 3, 0,
         // Back face
-        4, 5, 6,  6, 7, 4,
+        4, 5, 6, 6, 7, 4,
         // Left face
-        7, 3, 0,  0, 4, 7,
+        8, 9, 10, 10, 11, 8,
         // Right face
-        1, 5, 6,  6, 2, 1,
-        // Top face
-        3, 2, 6,  6, 7, 3,
+        12, 13, 14, 14, 15, 12,
         // Bottom face
-        0, 1, 5,  5, 4, 0
+        16, 17, 18, 18, 19, 16,
+        // Top face
+        20, 21, 22, 22, 23, 20
     };
 
     Mesh mesh;
@@ -236,9 +316,17 @@ Mesh create_cube() {
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, mesh.EBO);
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(cube_indices), cube_indices, GL_STATIC_DRAW);
 
-    // Position attribute
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)0);
+    // Position attribute (location 0): 3 floats starting at offset 0
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 9 * sizeof(float), (void*)0);
     glEnableVertexAttribArray(0);
+    
+    // Color attribute (location 1): 4 floats starting at offset 3
+    glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, 9 * sizeof(float), (void*)(3 * sizeof(float)));
+    glEnableVertexAttribArray(1);
+    
+    // Texture coordinate attribute (location 2): 2 floats starting at offset 7
+    glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 9 * sizeof(float), (void*)(7 * sizeof(float)));
+    glEnableVertexAttribArray(2);
 
     glBindVertexArray(0); // Unbind VAO
 
@@ -276,11 +364,11 @@ Entity create_entity(Mesh* mesh, Vec3 pos) {
 typedef struct {
     Vec3 position;
     Vec3 front; // Direction camera is looking
-    Vec3 up;    // Up direction (usually fixed at (0,1,0))
+    Vec3 up;    // Up direction
     Vec3 right; // Right direction
 
-    float yaw;   // Y-axis rotation (left/right)
-    float pitch; // X-axis rotation (up/down)
+    float yaw;   // Y-axis rotation
+    float pitch; // X-axis rotation
 
     float fov;
     float aspect_ratio;
@@ -293,9 +381,9 @@ Camera global_camera;
 Camera create_camera(float aspect) {
     Camera cam;
     cam.position = (Vec3){0, 0, 5};
-    cam.front = (Vec3){0, 0, -1}; // Initially look towards negative Z
+    cam.front = (Vec3){0, 0, -1};
     cam.up = (Vec3){0, 1, 0};
-    cam.right = (Vec3){1, 0, 0}; // Will be calculated
+    cam.right = (Vec3){1, 0, 0};
 
     cam.yaw = -90.0f;
     cam.pitch = 0.0f;
@@ -339,25 +427,35 @@ Mat4 camera_get_view_matrix(Camera* cam) {
 typedef struct {
     unsigned int program;
     int mvp_location; // Model-View-Projection matrix uniform location
+    int texture_location;
 } Shader;
 
-const char* vertex_shader_3d = "#version 330 core\n"
+const char* vertex_shader = "#version 330 core\n"
     "layout (location = 0) in vec3 aPos;\n"
+    "layout (location = 1) in vec4 aColor;\n"
+    "layout (location = 2) in vec2 aTexCoord;\n"
+    "out vec4 vertexColor;\n"
+    "out vec2 TexCoord;\n"
     "uniform mat4 uMVP;\n"
     "void main() {\n"
     "   gl_Position = uMVP * vec4(aPos, 1.0);\n"
+    "   vertexColor = aColor;\n"
+    "   TexCoord = aTexCoord;\n"
     "}\0";
 
-const char* fragment_shader_3d = "#version 330 core\n"
+const char* fragment_shader = "#version 330 core\n"
+    "in vec4 vertexColor;\n"
+    "in vec2 TexCoord;\n"
     "out vec4 FragColor;\n"
+    "uniform sampler2D u_texture;\n"
     "void main() {\n"
-    "   FragColor = vec4(0.8f, 0.4f, 0.2f, 1.0f);\n"
+    "FragColor = texture(u_texture, TexCoord) * vertexColor;\n"
     "}\0";
 
 Shader create_shader() {
     // Compile vertex shader
     unsigned int vertexShader = glCreateShader(GL_VERTEX_SHADER);
-    glShaderSource(vertexShader, 1, &vertex_shader_3d, NULL);
+    glShaderSource(vertexShader, 1, &vertex_shader, NULL);
     glCompileShader(vertexShader);
     
     // Check vertex shader compilation
@@ -371,7 +469,7 @@ Shader create_shader() {
 
     // Compile fragment shader
     unsigned int fragmentShader = glCreateShader(GL_FRAGMENT_SHADER);
-    glShaderSource(fragmentShader, 1, &fragment_shader_3d, NULL);
+    glShaderSource(fragmentShader, 1, &fragment_shader, NULL);
     glCompileShader(fragmentShader);
     
     // Check fragment shader compilation
@@ -400,6 +498,8 @@ Shader create_shader() {
     Shader shader;
     shader.program = program;
     shader.mvp_location = glGetUniformLocation(program, "uMVP");
+    shader.texture_location = glGetUniformLocation(program, "u_texture");
+
 
     return shader;
 }
@@ -423,7 +523,7 @@ void renderer_init(Renderer* renderer, float aspect) {
 void renderer_draw_entity(Renderer* renderer, Entity* entity) {
     if (!entity->active) return;
 
-    // Calculate transformation matrices using proper helper functions
+    // Calculate transformation matrices
     Mat4 scale_matrix = mat4_scale(entity->scale);
     
     // Apply rotations in ZYX order (roll, pitch, yaw) for typical Euler angles
@@ -447,6 +547,13 @@ void renderer_draw_entity(Renderer* renderer, Entity* entity) {
     // Use shader and set uniforms
     glUseProgram(renderer->shader.program);
     glUniformMatrix4fv(renderer->shader.mvp_location, 1, GL_FALSE, mvp.m);
+    
+    // Bind the texture
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, global_texture);
+        
+    // Set the texture uniform using the stored location
+    glUniform1i(renderer->shader.texture_location, 0);
 
     // Draw the mesh
     glBindVertexArray(entity->mesh->VAO);
@@ -483,10 +590,11 @@ int main() {
     // Initialize renderer (which also initializes the global_camera)
     Renderer renderer;
     renderer_init(&renderer, 800.0f / 600.0f);
-    // IMPORTANT: Call camera_update_vectors once after initialization to set initial front/right/up
     camera_update_vectors(&global_camera);
 
-    // Create some 3D objects (smaller cubes, spread further apart)
+    load_all_textures();
+    
+    // Create some 3D objects
     Mesh cube_mesh = create_cube();
 
     Entity entities[3];
@@ -534,7 +642,7 @@ int main() {
             entities[2].rotation.z = time * 1.5f;
         }
 
-        glClearColor(0.0f, 0.0f, 0.0f, 1.0f);  // Black background
+        glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
         // Render all entities
