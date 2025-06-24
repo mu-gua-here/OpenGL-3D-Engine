@@ -27,7 +27,33 @@ void framebuffer_size_callback(GLFWwindow* window, int width, int height);
 bool paused = false;
 
 // Engine
-int entity_count = 0;
+unsigned int entity_count = 0;
+
+// FPS counter
+double lastTime = 0.0;
+unsigned int frameCount = 0;
+double lastFrameTime = 0.0;
+
+void updateFPS(GLFWwindow* window) {
+    double currentTime = glfwGetTime();
+    frameCount++;
+    
+    // Calculate frame time in milliseconds
+    double frameTime = (currentTime - lastFrameTime) * 1000.0;
+    lastFrameTime = currentTime;
+    
+    // Update FPS counter every second
+    if (currentTime - lastTime >= 1.0) {
+        double fps = frameCount / (currentTime - lastTime);
+        
+        char title[256];
+        snprintf(title, sizeof(title), "C++ OpenGL 3D Engine - FPS: %.1f | Frame Time: %.2f ms", fps, frameTime);
+        glfwSetWindowTitle(window, title);
+                
+        frameCount = 0;
+        lastTime = currentTime;
+    }
+}
 
 // ============================================================================
 // LOAD TEXTURES
@@ -206,7 +232,7 @@ Mat4 mat4_scale(Vec3 scale) {
     return m;
 }
 
-// LookAt matrix
+// Lookat matrix
 Mat4 mat4_look_at(Vec3 eye, Vec3 center, Vec3 up) {
     Vec3 f = vec3_normalize(vec3_sub(center, eye)); // Forward vector
     Vec3 s = vec3_normalize(vec3_cross(f, up));      // Side vector
@@ -235,7 +261,6 @@ Mat4 mat4_look_at(Vec3 eye, Vec3 center, Vec3 up) {
 typedef struct {
     float* vertices;
     unsigned int* indices;
-    int vertex_count;
     int index_count;
     unsigned int VAO, VBO, EBO;
 } Mesh;
@@ -281,7 +306,6 @@ Mesh create_cube() {
         -0.5f,  0.5f,  0.5f,  1.0f, 0.0f, 1.0f, 1.0f,  0.0f, 0.0f
     };
 
-    // Indices array for 24 vertices
     static unsigned int cube_indices[] = {
         // Front face
         0, 1, 2, 2, 3, 0,
@@ -300,7 +324,6 @@ Mesh create_cube() {
     Mesh mesh;
     mesh.vertices = cube_vertices;
     mesh.indices = cube_indices;
-    mesh.vertex_count = 8;
     mesh.index_count = 36;
 
     // Buffers
@@ -587,7 +610,7 @@ int main() {
     glfwSetCursorPosCallback(window, mouse_callback);
     glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
 
-    // Initialize renderer (which also initializes the global_camera)
+    // Initialize renderer
     Renderer renderer;
     renderer_init(&renderer, 800.0f / 600.0f);
     camera_update_vectors(&global_camera);
@@ -596,19 +619,21 @@ int main() {
     
     // Create some 3D objects
     Mesh cube_mesh = create_cube();
-
-    Entity entities[3];
-    entities[0] = create_entity(&cube_mesh, (Vec3){-3, 0, -5});
-    entities[1] = create_entity(&cube_mesh, (Vec3){0, 0, -5});
-    entities[2] = create_entity(&cube_mesh, (Vec3){3, 0, -5});
-
-    printf("Basic 3D Engine initialized!\n");
+    
+    unsigned int total_entities = 3500;
+    Entity entities[total_entities];
+    for (unsigned int i = 0; i < total_entities; i++) {
+        entities[i] = create_entity(&cube_mesh, (Vec3){float((i - total_entities / 2) * 2), 0.0f, -5.0f});
+    }
+    
+    printf("3D Engine initialized!\n");
     printf("3D Objects: %d cubes\n", entity_count);
     printf("Controls: WASD to move, mouse to look around, E/Q to move up/down, ESC to exit\n");
     
     // Main render loop
     while (!glfwWindowShouldClose(window)) {
         glfwPollEvents(); // This processes events and calls mouse_callback
+        updateFPS(window);
         
         if (paused == false) {
             // Keyboard input for camera movement
@@ -637,16 +662,16 @@ int main() {
             
             // Update entities
             float time = glfwGetTime();
-            entities[0].rotation.x = time * 0.5f;
-            entities[1].rotation.y = time * 1.0f;
-            entities[2].rotation.z = time * 1.5f;
+            for (unsigned int i = 0; i < entity_count; i++) {
+                entities[i].rotation.x = time * 0.5f;
+            }
         }
 
         glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
         // Render all entities
-        for (int i = 0; i < entity_count; i++) {
+        for (unsigned int i = 0; i < entity_count; i++) {
             renderer_draw_entity(&renderer, &entities[i]);
         }
 
