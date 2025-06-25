@@ -100,13 +100,6 @@ GLuint loadTexture(const char* path) {
     return textureID;
 }
 
-// Load texture during setup/initialization
-GLuint global_texture = 0;
-
-void load_all_textures() {
-    global_texture = loadTexture("container.jpg");
-}
-
 // ============================================================================
 // MATH LIBRARY
 // ============================================================================
@@ -265,95 +258,131 @@ typedef struct {
     unsigned int VAO, VBO, EBO;
 } Mesh;
 
-// Create a cube mesh
-Mesh create_cube() {
-    static float cube_vertices[] = {
-        // Positions          Colors                   Texture coords
-        // Front face
-        -0.5f, -0.5f,  0.5f,  1.0f, 1.0f, 1.0f, 1.0f,  0.0f, 0.0f,
-         0.5f, -0.5f,  0.5f,  1.0f, 1.0f, 1.0f, 1.0f,  1.0f, 0.0f,
-         0.5f,  0.5f,  0.5f,  1.0f, 1.0f, 1.0f, 1.0f,  1.0f, 1.0f,
-        -0.5f,  0.5f,  0.5f,  1.0f, 1.0f, 1.0f, 1.0f,  0.0f, 1.0f,
+// UV coordinates
+typedef struct {
+    float u, v;
+} Vec2;
 
-        // Back face
-        -0.5f, -0.5f, -0.5f,  1.0f, 0.0f, 0.0f, 1.0f,  1.0f, 0.0f,
-         0.5f, -0.5f, -0.5f,  1.0f, 0.0f, 0.0f, 1.0f,  0.0f, 0.0f,
-         0.5f,  0.5f, -0.5f,  1.0f, 0.0f, 0.0f, 1.0f,  0.0f, 1.0f,
-        -0.5f,  0.5f, -0.5f,  1.0f, 0.0f, 0.0f, 1.0f,  1.0f, 1.0f,
+// RGBA color structure
+typedef struct {
+    float r, g, b, a;
+} Color;
 
-        // Left face
-        -0.5f,  0.5f,  0.5f,  0.0f, 1.0f, 0.0f, 1.0f,  1.0f, 0.0f,
-        -0.5f,  0.5f, -0.5f,  0.0f, 1.0f, 0.0f, 1.0f,  1.0f, 1.0f,
-        -0.5f, -0.5f, -0.5f,  0.0f, 1.0f, 0.0f, 1.0f,  0.0f, 1.0f,
-        -0.5f, -0.5f,  0.5f,  0.0f, 1.0f, 0.0f, 1.0f,  0.0f, 0.0f,
+// Backface culling modes
+typedef enum {
+    CULL_NONE = 0,
+    CULL_BACK = 1,
+    CULL_FRONT = 2
+} CullMode;
 
-        // Right face
-         0.5f,  0.5f,  0.5f,  1.0f, 1.0f, 0.0f, 1.0f,  1.0f, 0.0f,
-         0.5f,  0.5f, -0.5f,  1.0f, 1.0f, 0.0f, 1.0f,  1.0f, 1.0f,
-         0.5f, -0.5f, -0.5f,  1.0f, 1.0f, 0.0f, 1.0f,  0.0f, 1.0f,
-         0.5f, -0.5f,  0.5f,  1.0f, 1.0f, 0.0f, 1.0f,  0.0f, 0.0f,
+// Triangle mesh structure
+typedef struct {
+    float vertices[36]; // 3 vertices * 12 floats per vertex (pos + color + uv + normal)
+    unsigned int indices[3]; // Always just 0, 1, 2 for a triangle
+    unsigned int VAO, VBO, EBO;
+    GLuint texture_id;
+    CullMode cull_mode;
+} TriangleMesh;
 
-        // Bottom face
-        -0.5f, -0.5f, -0.5f,  0.0f, 0.0f, 1.0f, 1.0f,  0.0f, 1.0f,
-         0.5f, -0.5f, -0.5f,  0.0f, 0.0f, 1.0f, 1.0f,  1.0f, 1.0f,
-         0.5f, -0.5f,  0.5f,  0.0f, 0.0f, 1.0f, 1.0f,  1.0f, 0.0f,
-        -0.5f, -0.5f,  0.5f,  0.0f, 0.0f, 1.0f, 1.0f,  0.0f, 0.0f,
-
-        // Top face
-        -0.5f,  0.5f, -0.5f,  1.0f, 0.0f, 1.0f, 1.0f,  0.0f, 1.0f,
-         0.5f,  0.5f, -0.5f,  1.0f, 0.0f, 1.0f, 1.0f,  1.0f, 1.0f,
-         0.5f,  0.5f,  0.5f,  1.0f, 0.0f, 1.0f, 1.0f,  1.0f, 0.0f,
-        -0.5f,  0.5f,  0.5f,  1.0f, 0.0f, 1.0f, 1.0f,  0.0f, 0.0f
+// Create a triangle from three positions, color, texture, UVs, and culling mode
+TriangleMesh create_triangle(Vec3 pos1, Vec3 pos2, Vec3 pos3,
+                            Color color,
+                            GLuint texture_id,
+                            Vec2 uv1, Vec2 uv2, Vec2 uv3,
+                            CullMode cull_mode) {
+    
+    TriangleMesh triangle;
+    triangle.texture_id = texture_id;
+    triangle.cull_mode = cull_mode;
+    
+    // Calculate face normal using cross product
+    Vec3 edge1 = vec3_sub(pos2, pos1);
+    Vec3 edge2 = vec3_sub(pos3, pos1);
+    Vec3 normal = vec3_normalize(vec3_cross(edge1, edge2));
+    
+    // Build vertex data array: position(3) + color(4) + uvs(2) + normals(3) = 12 floats per vertex
+    float vertices[] = {
+        // Vertex 1
+        pos1.x, pos1.y, pos1.z,           // Position
+        color.r, color.g, color.b, color.a, // Color
+        uv1.u, uv1.v,                     // UV coordinates
+        normal.x, normal.y, normal.z,     // Normal
+        
+        // Vertex 2
+        pos2.x, pos2.y, pos2.z,           // Position
+        color.r, color.g, color.b, color.a, // Color
+        uv2.u, uv2.v,                     // UV coordinates
+        normal.x, normal.y, normal.z,     // Normal
+        
+        // Vertex 3
+        pos3.x, pos3.y, pos3.z,           // Position
+        color.r, color.g, color.b, color.a, // Color
+        uv3.u, uv3.v,                     // UV coordinates
+        normal.x, normal.y, normal.z      // Normal
     };
-
-    static unsigned int cube_indices[] = {
-        // Front face
-        0, 1, 2, 2, 3, 0,
-        // Back face
-        4, 5, 6, 6, 7, 4,
-        // Left face
-        8, 9, 10, 10, 11, 8,
-        // Right face
-        12, 13, 14, 14, 15, 12,
-        // Bottom face
-        16, 17, 18, 18, 19, 16,
-        // Top face
-        20, 21, 22, 22, 23, 20
-    };
-
-    Mesh mesh;
-    mesh.vertices = cube_vertices;
-    mesh.indices = cube_indices;
-    mesh.index_count = 36;
-
-    // Buffers
-    glGenVertexArrays(1, &mesh.VAO);
-    glGenBuffers(1, &mesh.VBO);
-    glGenBuffers(1, &mesh.EBO);
-
-    glBindVertexArray(mesh.VAO);
-
-    glBindBuffer(GL_ARRAY_BUFFER, mesh.VBO);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(cube_vertices), cube_vertices, GL_STATIC_DRAW);
-
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, mesh.EBO);
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(cube_indices), cube_indices, GL_STATIC_DRAW);
-
-    // Position attribute (location 0): 3 floats starting at offset 0
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 9 * sizeof(float), (void*)0);
+    
+    // Copy vertices to triangle structure
+    for (int i = 0; i < 36; i++) {
+        triangle.vertices[i] = vertices[i];
+    }
+    
+    triangle.indices[0] = 0;
+    triangle.indices[1] = 1;
+    triangle.indices[2] = 2;
+    
+    // Create OpenGL buffers
+    glGenVertexArrays(1, &triangle.VAO);
+    glGenBuffers(1, &triangle.VBO);
+    glGenBuffers(1, &triangle.EBO);
+    
+    glBindVertexArray(triangle.VAO);
+    
+    glBindBuffer(GL_ARRAY_BUFFER, triangle.VBO);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
+    
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, triangle.EBO);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(triangle.indices), triangle.indices, GL_STATIC_DRAW);
+    
+    // Set up vertex attributes (same as your cube setup)
+    // Position attribute (location 0)
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 12 * sizeof(float), (void*)0);
     glEnableVertexAttribArray(0);
     
-    // Color attribute (location 1): 4 floats starting at offset 3
-    glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, 9 * sizeof(float), (void*)(3 * sizeof(float)));
+    // Color attribute (location 1)
+    glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, 12 * sizeof(float), (void*)(3 * sizeof(float)));
     glEnableVertexAttribArray(1);
     
-    // Texture coordinate attribute (location 2): 2 floats starting at offset 7
-    glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 9 * sizeof(float), (void*)(7 * sizeof(float)));
+    // Texture coordinate attribute (location 2)
+    glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 12 * sizeof(float), (void*)(7 * sizeof(float)));
     glEnableVertexAttribArray(2);
+    
+    // Normal attribute (location 3)
+    glVertexAttribPointer(3, 3, GL_FLOAT, GL_FALSE, 12 * sizeof(float), (void*)(9 * sizeof(float)));
+    glEnableVertexAttribArray(3);
+    
+    glBindVertexArray(0);
+    
+    return triangle;
+}
 
-    glBindVertexArray(0); // Unbind VAO
+// Updated entity system to work with triangles
+typedef struct {
+    Vec3 position;
+    Vec3 rotation;
+    Vec3 scale;
+    TriangleMesh* triangle_mesh; // Use triangle mesh instead of general mesh
+    int active;
+} TriangleEntity;
 
-    return mesh;
+// Create triangle entity
+TriangleEntity create_entity(TriangleMesh* triangle_mesh, Vec3 pos) {
+    TriangleEntity entity;
+    entity.position = pos;
+    entity.rotation = (Vec3){0, 0, 0};
+    entity.scale = (Vec3){1, 1, 1};
+    entity.triangle_mesh = triangle_mesh;
+    entity.active = 1;
+    return entity;
 }
 
 // ============================================================================
@@ -362,7 +391,7 @@ Mesh create_cube() {
 
 typedef struct {
     Vec3 position;
-    Vec3 rotation; // Keep for object rotation
+    Vec3 rotation;
     Vec3 scale;
     Mesh* mesh;
     int active;
@@ -543,45 +572,58 @@ void renderer_init(Renderer* renderer, float aspect) {
     glDepthFunc(GL_LESS);
 }
 
-void renderer_draw_entity(Renderer* renderer, Entity* entity) {
+// Render function for triangle entities
+void renderer_draw_triangle(Renderer* renderer, TriangleEntity* entity) {
     if (!entity->active) return;
-
-    // Calculate transformation matrices
-    Mat4 scale_matrix = mat4_scale(entity->scale);
     
-    // Apply rotations in ZYX order (roll, pitch, yaw) for typical Euler angles
+    // Set up culling based on triangle's cull mode
+    switch (entity->triangle_mesh->cull_mode) {
+        case CULL_NONE:
+            glDisable(GL_CULL_FACE);
+            break;
+        case CULL_BACK:
+            glEnable(GL_CULL_FACE);
+            glCullFace(GL_BACK);
+            break;
+        case CULL_FRONT:
+            glEnable(GL_CULL_FACE);
+            glCullFace(GL_FRONT);
+            break;
+    }
+    
+    // Same transformation logic as your existing renderer
+    Mat4 scale_matrix = mat4_scale(entity->scale);
     Mat4 rotation_x = mat4_rotate_x(entity->rotation.x);
     Mat4 rotation_y = mat4_rotate_y(entity->rotation.y);
     Mat4 rotation_z = mat4_rotate_z(entity->rotation.z);
     Mat4 rotation = mat4_multiply(rotation_z, mat4_multiply(rotation_y, rotation_x));
-
     Mat4 translation = mat4_translate(entity->position);
-
-    // Combine transformations: Translation * Rotation * Scale
     Mat4 model = mat4_multiply(translation, mat4_multiply(rotation, scale_matrix));
-
-    // Get view and projection from the GLOBAL camera
+    
     Mat4 view = camera_get_view_matrix(&global_camera);
     Mat4 projection = camera_get_projection(&global_camera);
-
-    // Calculate MVP: Projection * View * Model
     Mat4 mvp = mat4_multiply(projection, mat4_multiply(view, model));
-
+    
     // Use shader and set uniforms
     glUseProgram(renderer->shader.program);
     glUniformMatrix4fv(renderer->shader.mvp_location, 1, GL_FALSE, mvp.m);
     
-    // Bind the texture
+    // Bind the triangle's specific texture
     glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, global_texture);
-        
-    // Set the texture uniform using the stored location
+    glBindTexture(GL_TEXTURE_2D, entity->triangle_mesh->texture_id);
     glUniform1i(renderer->shader.texture_location, 0);
+    
+    // Draw the triangle
+    glBindVertexArray(entity->triangle_mesh->VAO);
+    glDrawElements(GL_TRIANGLES, 3, GL_UNSIGNED_INT, 0);
+    glBindVertexArray(0);
+}
 
-    // Draw the mesh
-    glBindVertexArray(entity->mesh->VAO);
-    glDrawElements(GL_TRIANGLES, entity->mesh->index_count, GL_UNSIGNED_INT, 0);
-    glBindVertexArray(0); // Unbind VAO after drawing
+// Cleanup function for triangle mesh
+void cleanup_triangle_mesh(TriangleMesh* triangle) {
+    glDeleteVertexArrays(1, &triangle->VAO);
+    glDeleteBuffers(1, &triangle->VBO);
+    glDeleteBuffers(1, &triangle->EBO);
 }
 
 // ============================================================================
@@ -614,17 +656,19 @@ int main() {
     Renderer renderer;
     renderer_init(&renderer, 800.0f / 600.0f);
     camera_update_vectors(&global_camera);
-
-    load_all_textures();
+    
+    // LOAD ALL TEXTURES
+    
+    GLuint all_textures[] = {0};
+    all_textures[0] = loadTexture("container.jpg");
     
     // Create some 3D objects
-    Mesh cube_mesh = create_cube();
     
-    unsigned int total_entities = 3500;
-    Entity entities[total_entities];
-    for (unsigned int i = 0; i < total_entities; i++) {
-        entities[i] = create_entity(&cube_mesh, (Vec3){float((i - total_entities / 2) * 2), 0.0f, -5.0f});
-    }
+    TriangleMesh triangle_mesh = create_triangle((Vec3) {0, 0, 0}, (Vec3) {1, 0, 0}, (Vec3) {1, 1, 0}, {1, 1, 1, 1}, all_textures[0], (Vec2) {0, 0}, (Vec2) {1, 0}, (Vec2) {1, 1}, CULL_BACK);
+    
+    TriangleEntity entities[2];
+    entities[0] = create_entity(&triangle_mesh, (Vec3){0, 0, 0});
+    entities[1] = create_entity(&triangle_mesh, (Vec3){3, 0, 0});
     
     printf("3D Engine initialized!\n");
     printf("3D Objects: %d cubes\n", entity_count);
@@ -671,8 +715,8 @@ int main() {
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
         // Render all entities
-        for (unsigned int i = 0; i < entity_count; i++) {
-            renderer_draw_entity(&renderer, &entities[i]);
+        for (int i = 0; i < 2; i++) {
+            renderer_draw_triangle(&renderer, &entities[i]);
         }
 
         glfwSwapBuffers(window);
