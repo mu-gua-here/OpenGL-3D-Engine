@@ -1,8 +1,8 @@
 //
-//  main.mm
-//  OpenGL Test
+//  main.mm
+//  OpenGL Test
 //
-//  Created by Ray Hsiao Muguang on 2025/6/20.
+//  Created by Ray Hsiao Muguang on 2025/6/20.
 //
 
 #define GL_SILENCE_DEPRECATION
@@ -13,6 +13,7 @@
 #include <math.h>
 #include <cmath>
 #include <iostream>
+#include <vector>
 #include "stb_image.h"
 
 // --- Function Prototypes ---
@@ -27,8 +28,10 @@ void framebuffer_size_callback(GLFWwindow* window, int width, int height);
 bool paused = false;
 
 // Engine
-GLuint entity_count = 0;
-GLuint texture_count;
+GLuint ENTITY_COUNT = 0;
+
+// Global mesh registry for cleanup
+std::vector<class Mesh*> global_mesh_registry;
 
 // FPS counter
 double lastTime = 0.0;
@@ -58,6 +61,13 @@ void updateFPS(GLFWwindow* window) {
 // ============================================================================
 // LOAD TEXTURES
 // ============================================================================
+
+enum Textures {
+    MOUNTAIN_SKYBOX = 0,
+    CONCRETE_GROUND = 1,
+    BRICK_WALL = 2,
+    TEXTURE_COUNT
+};
 
 GLuint loadTexture(const char* path) {
     int width, height, channels;
@@ -269,38 +279,103 @@ typedef enum {
     CULL_FRONT = 2
 } CullMode;
 
+enum MeshType {
+    SKYBOX_MESH = 0,
+    CONCRETE_FLOOR_MESH = 1,
+    BRICK_WALL_MESH = 2,
+    MESH_COUNT
+};
+
+// ============================================================================
+// MESH TEMPLATE SYSTEM
+// ============================================================================
+
 // Template structure for pre-computed mesh data
 typedef struct {
     const float* vertices;     // Pre-computed vertex data
     const unsigned int* indices; // Pre-computed indices
     int vertex_count;         // Number of floats in vertices
     int index_count;          // Number of indices
-    int triangle_count;       // Number of triangles
-} MultiTriangleMeshTemplate;
+    int TRIANGLE_COUNT;       // Number of triangles
+} MeshTemplate;
 
-// Updated MultiTriangleMesh structure
-typedef struct {
+// Updated mesh structure with registry support
+class Mesh {
+public:
     float* vertices;        // Dynamic array (allocated from template)
     unsigned int* indices;  // Dynamic array (allocated from template)
     int vertex_count;
     int index_count;
-    int triangle_count;
+    int TRIANGLE_COUNT;
     GLuint VAO, VBO, EBO;
     GLuint texture_id;
     CullMode cull_mode;
-} MultiTriangleMesh;
+    
+    // Constructor - automatically registers mesh
+    Mesh() : vertices(nullptr), indices(nullptr), vertex_count(0), index_count(0),
+             TRIANGLE_COUNT(0), VAO(0), VBO(0), EBO(0), texture_id(0), cull_mode(CULL_BACK) {
+        global_mesh_registry.push_back(this);
+    }
+    
+    // Destructor - automatically unregisters and cleans up
+    ~Mesh() {
+        cleanup();
+        // Remove from registry
+        auto it = std::find(global_mesh_registry.begin(), global_mesh_registry.end(), this);
+        if (it != global_mesh_registry.end()) {
+            global_mesh_registry.erase(it);
+        }
+    }
+    
+    // Get VAO for debugging
+    GLuint getVAO() const { return VAO; }
+    
+    // Check if mesh is valid
+    bool isValid() const {
+        return VAO != 0 && TRIANGLE_COUNT > 0;
+    }
+    
+    // Cleanup method
+    void cleanup() {
+        if (vertices) {
+            free(vertices);
+            vertices = nullptr;
+        }
+        if (indices) {
+            free(indices);
+            indices = nullptr;
+        }
+        
+        if (VAO != 0) glDeleteVertexArrays(1, &VAO);
+        if (VBO != 0) glDeleteBuffers(1, &VBO);
+        if (EBO != 0) glDeleteBuffers(1, &EBO);
+        
+        VAO = VBO = EBO = 0;
+        vertex_count = index_count = TRIANGLE_COUNT = 0;
+    }
+};
 
-// Mesh structure
-typedef struct {
-    float vertices[36]; // 3 vertices * 12 floats per vertex (pos + color + uv + normal)
-    unsigned int indices[3];
-    unsigned int VAO, VBO, EBO;
-    GLuint texture_id;
-    CullMode cull_mode;
-} Mesh;
+// Global cleanup function
+void cleanup_all_meshes() {
+    printf("Cleaning up %zu meshes...\n", global_mesh_registry.size());
+    
+    // Clean up all registered meshes
+    for (auto* mesh : global_mesh_registry) {
+        if (mesh) {
+            mesh->cleanup();
+        }
+    }
+    
+    // Clear the registry
+    global_mesh_registry.clear();
+    printf("All meshes cleaned up successfully.\n");
+}
 
+// PRE-COMPUTED CUBE TEMPLATE DATA //
 
-// MESH TEMPLATES //
+// Unit cube centered at origin (will be transformed later)
+// 24 vertices (4 per face * 6 faces) for proper normals and UVs
+// Format: position(3) + color(4) + uv(2) + normal(3) = 12 floats per vertex
 
 static const float CUBE_VERTICES[] = {
     // Front face (Z = +0.5, normal = 0,0,1)
@@ -357,44 +432,34 @@ static const unsigned int CUBE_INDICES[] = {
 };
 
 // Template definition
-static const MultiTriangleMeshTemplate CUBE_TEMPLATE = {
+static const MeshTemplate CUBE_TEMPLATE = {
     .vertices = CUBE_VERTICES,
     .indices = CUBE_INDICES,
     .vertex_count = sizeof(CUBE_VERTICES) / sizeof(float),  // 288 floats (24 vertices * 12)
     .index_count = sizeof(CUBE_INDICES) / sizeof(unsigned int), // 36 indices
-    .triangle_count = 12
+    .TRIANGLE_COUNT = 12
 };
 
-// Mesh creation
-MultiTriangleMesh create_cube(Vec3 center, float size, Color color, GLuint texture_id, bool inward_normals) {
-    MultiTriangleMesh mesh = copy_template(&CUBE_TEMPLATE); // Single memcpy
-    transform_mesh_vertices(&mesh, center, size, color, inward_normals); // In-place transform
-    mesh.texture_id = texture_id;
-    mesh.cull_mode = inward_normals ? CULL_FRONT : CULL_BACK;
-    finalize_multi_triangle_mesh(&mesh);
-    return mesh;
-}
+// ============================================================================
+// TEMPLATE MESH CREATION FUNCTIONS
+// ============================================================================
 
-MultiTriangleMesh copy_mesh_template(const MultiTriangleMeshTemplate* template) {
-    MultiTriangleMesh mesh = {0};
-    
-    mesh.vertex_count = template->vertex_count;
-    mesh.index_count = template->index_count;
-    mesh.triangle_count = template->triangle_count;
+// Copy template data to new mesh
+void copy_mesh_template(Mesh* mesh, const MeshTemplate* mesh_template) {
+    mesh->vertex_count = mesh_template->vertex_count;
+    mesh->index_count = mesh_template->index_count;
+    mesh->TRIANGLE_COUNT = mesh_template->TRIANGLE_COUNT;
     
     // Allocate memory for mesh data
-    mesh.vertices = (float*)malloc(mesh.vertex_count * sizeof(float));
-    mesh.indices = (unsigned int*)malloc(mesh.index_count * sizeof(unsigned int));
+    mesh->vertices = (float*)malloc(mesh->vertex_count * sizeof(float));
+    mesh->indices = (unsigned int*)malloc(mesh->index_count * sizeof(unsigned int));
     
-    // Single fast memory copy
-    memcpy(mesh.vertices, template->vertices, mesh.vertex_count * sizeof(float));
-    memcpy(mesh.indices, template->indices, mesh.index_count * sizeof(unsigned int));
-    
-    return mesh;
+    memcpy(mesh->vertices, mesh_template->vertices, mesh->vertex_count * sizeof(float));
+    memcpy(mesh->indices, mesh_template->indices, mesh->index_count * sizeof(unsigned int));
 }
 
 // Transform mesh vertices in-place (position, scale, color, normals)
-void transform_mesh_vertices(MultiTriangleMesh* mesh, Vec3 center, float size, Color color, bool invert_normals) {
+void transform_mesh_vertices(Mesh* mesh, Vec3 center, float size, Color color, bool invert_normals) {
     float normal_mult = invert_normals ? -1.0f : 1.0f;
     
     for (int i = 0; i < mesh->vertex_count; i += 12) {
@@ -420,9 +485,19 @@ void transform_mesh_vertices(MultiTriangleMesh* mesh, Vec3 center, float size, C
     }
 }
 
+// Flip triangle winding order (for skybox - alternative to normal inversion)
+void flip_mesh_winding(Mesh* mesh) {
+    for (int i = 0; i < mesh->index_count; i += 3) {
+        // Swap second and third vertex of each triangle
+        unsigned int temp = mesh->indices[i + 1];
+        mesh->indices[i + 1] = mesh->indices[i + 2];
+        mesh->indices[i + 2] = temp;
+    }
+}
 
-void finalize_multi_triangle_mesh(MultiTriangleMesh* mesh) {
-    if (mesh->triangle_count == 0) {
+// Upload mesh data to GPU
+void finalize_multi_triangle_mesh(Mesh* mesh) {
+    if (mesh->TRIANGLE_COUNT == 0) {
         printf("Warning: Finalizing empty mesh\n");
         return;
     }
@@ -461,8 +536,36 @@ void finalize_multi_triangle_mesh(MultiTriangleMesh* mesh) {
     
     glBindVertexArray(0);
     
-    printf("Finalized mesh: %d triangles, %d vertices, %d indices\n",
-           mesh->triangle_count, mesh->vertex_count/12, mesh->index_count);
+    printf("Finalized mesh: %d triangles, %d vertices, %d indices, VAO: %u\n",
+           mesh->TRIANGLE_COUNT, mesh->vertex_count/12, mesh->index_count, mesh->VAO);
+    ENTITY_COUNT += 1;
+}
+
+// ============================================================================
+// HIGH-LEVEL CUBE CREATION FUNCTIONS
+// ============================================================================
+
+// Create regular cube (outward-facing normals)
+Mesh* create_cube_mesh(Vec3 center, float size, Color color, GLuint texture_id) {
+    Mesh* mesh = new Mesh();
+    copy_mesh_template(mesh, &CUBE_TEMPLATE);
+    transform_mesh_vertices(mesh, center, size, color, false);
+    mesh->texture_id = texture_id;
+    mesh->cull_mode = CULL_BACK;
+    finalize_multi_triangle_mesh(mesh);
+    return mesh;
+}
+
+// Create skybox cube (inward-facing normals, front-face culling)
+Mesh* create_skybox_mesh(Vec3 center, float size, Color color, GLuint texture_id) {
+    Mesh* mesh = new Mesh();
+    copy_mesh_template(mesh, &CUBE_TEMPLATE);
+    transform_mesh_vertices(mesh, center, size, color, true);  // Invert normals
+    flip_mesh_winding(mesh);  // Flip triangle winding for inward faces
+    mesh->texture_id = texture_id;
+    mesh->cull_mode = CULL_FRONT;  // Cull front faces (we're inside the cube)
+    finalize_multi_triangle_mesh(mesh);
+    return mesh;
 }
 
 // Entity structure
@@ -474,7 +577,7 @@ typedef struct {
     int active;
 } Entity;
 
-// Create triangle entity
+// Create entity
 Entity create_entity(Mesh* mesh, Vec3 pos) {
     Entity entity;
     entity.position = pos;
@@ -482,7 +585,6 @@ Entity create_entity(Mesh* mesh, Vec3 pos) {
     entity.scale = (Vec3){1, 1, 1};
     entity.mesh = mesh;
     entity.active = 1;
-    entity_count += 1;
     return entity;
 }
 
@@ -648,12 +750,11 @@ void renderer_init(Renderer* renderer, float aspect) {
     glDepthFunc(GL_LESS);
 }
 
-// Render function for triangle entities
-void renderer_draw_triangle(Renderer* renderer, Entity* entity) {
-    if (!entity->active) return;
+void draw_mesh(Renderer* renderer, Entity* entity, Mesh* mesh) {
+    if (!entity->active || mesh->TRIANGLE_COUNT == 0) return;
     
-    // Set up culling based on triangle's cull mode
-    switch (entity->mesh->cull_mode) {
+    // Set up culling based on mesh's cull mode
+    switch (mesh->cull_mode) {
         case CULL_NONE:
             glDisable(GL_CULL_FACE);
             break;
@@ -661,13 +762,13 @@ void renderer_draw_triangle(Renderer* renderer, Entity* entity) {
             glEnable(GL_CULL_FACE);
             glCullFace(GL_BACK);
             break;
-        case CULL_FRONT:
+        case CULL_FRONT:  // For skybox
             glEnable(GL_CULL_FACE);
             glCullFace(GL_FRONT);
             break;
     }
     
-    // Transformation logic
+    // Calculate transformation matrices
     Mat4 scale_matrix = mat4_scale(entity->scale);
     Mat4 rotation_x = mat4_rotate_x(entity->rotation.x);
     Mat4 rotation_y = mat4_rotate_y(entity->rotation.y);
@@ -684,25 +785,15 @@ void renderer_draw_triangle(Renderer* renderer, Entity* entity) {
     glUseProgram(renderer->shader.program);
     glUniformMatrix4fv(renderer->shader.mvp_location, 1, GL_FALSE, mvp.m);
     
-    // Bind the triangle's specific texture
+    // Bind texture
     glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, entity->mesh->texture_id);
+    glBindTexture(GL_TEXTURE_2D, mesh->texture_id);
     glUniform1i(renderer->shader.texture_location, 0);
     
-    // Draw the triangle
-    glBindVertexArray(entity->mesh->VAO);
-    glDrawElements(GL_TRIANGLES, 3, GL_UNSIGNED_INT, 0);
+    // Draw the entire mesh in one call
+    glBindVertexArray(mesh->VAO);
+    glDrawElements(GL_TRIANGLES, mesh->index_count, GL_UNSIGNED_INT, 0);
     glBindVertexArray(0);
-}
-
-// Cleanup function for triangle mesh
-void cleanup_triangle_mesh(Mesh* triangle) {
-    if (triangle->VAO != 0) glDeleteVertexArrays(1, &triangle->VAO);
-    if (triangle->VBO != 0) glDeleteBuffers(1, &triangle->VBO);
-    if (triangle->EBO != 0) glDeleteBuffers(1, &triangle->EBO);
-    triangle->VAO = 0; // Set to 0 to prevent double-deletion
-    triangle->VBO = 0;
-    triangle->EBO = 0;
 }
 
 // ============================================================================
@@ -746,43 +837,47 @@ int main() {
         printf("Shader program created successfully. Program ID: %u\n", renderer.shader.program);
     }
     
+    // ============================================================================
+    // LOAD ALL TEXTURES
+    // ============================================================================
     
-    // LOAD ALL TEXTURES //
+    GLuint all_textures[TEXTURE_COUNT];
+    all_textures[MOUNTAIN_SKYBOX] = loadTexture("mountain_skybox.png");
+    all_textures[CONCRETE_GROUND] = loadTexture("concrete_ground_texture.jpg");
+    all_textures[BRICK_WALL] = loadTexture("brick_wall_texture.jpg");
     
-    texture_count = 3;
-    GLuint all_textures[texture_count];
-    all_textures[0] = loadTexture("concrete_ground_texture.jpg");
-    all_textures[1] = loadTexture("brick_wall_texture.jpg");
+    // ============================================================================
+    // CREATE ALL SCENE OBJECTS
+    // ============================================================================
     
-    // Skybox
-    all_textures[2] = loadTexture("mountain_skybox.png");
+    Mesh* all_meshes[3];
+    all_meshes[SKYBOX_MESH] = create_skybox_mesh((Vec3){0, 0, 0}, 1000.0f, (Color){1, 1, 1, 1}, all_textures[MOUNTAIN_SKYBOX]);
+    all_meshes[CONCRETE_FLOOR_MESH] = create_cube_mesh((Vec3){0, 0, 0}, 2.0f, (Color){1, 1, 1, 1}, all_textures[CONCRETE_GROUND]);
+    all_meshes[BRICK_WALL_MESH] = create_cube_mesh((Vec3){0, 0, 0}, 2.0f, (Color){1, 1, 1, 1}, all_textures[BRICK_WALL]);
     
-    
-    // CREATE ALL SCENE OBJECTS //
-    
-    Mesh mesh = create_triangle((Vec3) {0, 0, 0}, (Vec3) {1, 0, 0}, (Vec3) {1, 1, 0}, {1, 1, 1, 1}, all_textures[1], (Vec2) {0, 0}, (Vec2) {1, 0}, (Vec2) {1, 1}, CULL_NONE);
-    
-    // Verify the VAO for the mesh
-    if (mesh.VAO == 0) {
-        printf("Mesh VAO creation failed. Exiting.\n");
-        glfwDestroyWindow(window);
-        glDeleteTextures(texture_count, all_textures); // Clean up texture
-        glDeleteProgram(renderer.shader.program); // Clean up shader
-        glfwTerminate();
-        return -1;
-    } else {
-        printf("Mesh VAO created successfully. VAO ID: %u\n", mesh.VAO);
+    // Verify all meshes are valid
+    bool all_meshes_valid = true;
+    for (int i = 0; i < MESH_COUNT; i++) {
+        if (!all_meshes[i] || !all_meshes[i]->isValid()) {
+            printf("Mesh %d creation failed. Exiting.\n", i);
+            all_meshes_valid = false;
+            break;
+        } else {
+            printf("Mesh %d created successfully. VAO: %u, Triangles: %d\n",
+                   i, all_meshes[i]->getVAO(), all_meshes[i]->TRIANGLE_COUNT);
+        }
     }
     
-    Entity entities[1];
-    for (unsigned int i = 0; i < 1; i++) {
-        entities[i] = create_entity(&mesh, (Vec3){float(i * 3), 0.0f, 0.0f});
-    }
+    // Create entities
+    std::vector<Entity> all_entities;
+    all_entities.push_back(create_entity(all_meshes[SKYBOX_MESH], (Vec3){0, 0, 0}));
+    all_entities.push_back(create_entity(all_meshes[CONCRETE_FLOOR_MESH], (Vec3){0, 0, 0}));
+    all_entities.push_back(create_entity(all_meshes[BRICK_WALL_MESH], (Vec3){5, 0, 0}));
 
     printf("3D Engine initialized!\n");
-    printf("3D Objects: %d game objects\n", entity_count);
+    printf("Total registered meshes: %zu\n", global_mesh_registry.size());
+    printf("3D Objects: %d game objects\n", ENTITY_COUNT);
     printf("Controls: WASD to move, mouse to look around, E/Q to move up/down, ESC to exit\n");
-    
     
     // ENGINE MAIN LOOP //
     
@@ -797,16 +892,16 @@ int main() {
                 camera_speed *= 2;
             }
             if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) {
-                global_camera.position = vec3_add(global_camera.position, vec3_scale(global_camera.front, camera_speed));
+                global_camera.position = vec3_add(global_camera.position, vec3_scale((Vec3){global_camera.front.x, 0, global_camera.front.z}, camera_speed));
             }
             if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) {
-                global_camera.position = vec3_sub(global_camera.position, vec3_scale(Vec3(global_camera.front.x, 0, global_camera.front.z), camera_speed));
+                global_camera.position = vec3_sub(global_camera.position, vec3_scale((Vec3){global_camera.front.x, 0, global_camera.front.z}, camera_speed));
             }
             if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) {
-                global_camera.position = vec3_sub(global_camera.position, vec3_scale(Vec3(global_camera.right.x, 0, global_camera.right.z), camera_speed));
+                global_camera.position = vec3_sub(global_camera.position, vec3_scale((Vec3){global_camera.right.x, 0, global_camera.right.z}, camera_speed));
             }
             if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) {
-                global_camera.position = vec3_add(global_camera.position, vec3_scale(Vec3(global_camera.right.x, 0, global_camera.right.z), camera_speed));
+                global_camera.position = vec3_add(global_camera.position, vec3_scale((Vec3){global_camera.right.x, 0, global_camera.right.z}, camera_speed));
             }
             if (glfwGetKey(window, GLFW_KEY_E) == GLFW_PRESS) {
                 global_camera.position.y += camera_speed;
@@ -818,11 +913,23 @@ int main() {
 
         glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
-        // RENDER ALL ENTITIES
-        for (int i = 0; i < entity_count; i++) {
-            renderer_draw_triangle(&renderer, &entities[i]);
-        }
+        
+        
+        // ============================================================================
+        // RENDER ALL SCENE OBJECTS
+        // ============================================================================
+        
+        // Render skybox first
+        glDepthMask(GL_FALSE);
+        all_entities[0].position = global_camera.position; // Follow camera
+        draw_mesh(&renderer, &all_entities[0], all_meshes[SKYBOX_MESH]);
+        glDepthMask(GL_TRUE);
+        
+        // Render regular objects
+        draw_mesh(&renderer, &all_entities[1], all_meshes[CONCRETE_FLOOR_MESH]);
+        
+        all_entities[2].rotation.y = glfwGetTime(); // Spinning cube
+        draw_mesh(&renderer, &all_entities[2], all_meshes[BRICK_WALL_MESH]);
 
         glfwSwapBuffers(window);
 
@@ -841,15 +948,19 @@ int main() {
         }
     }
     
-    // Clean up OpenGL resources before destroying the GLFW context
-    cleanup_triangle_mesh(&mesh);
-    glDeleteTextures(texture_count, all_textures);
+    // Clean up all resources before destroying the GLFW context
+    cleanup_all_meshes();
+    
+    // Clean up other OpenGL resources
+    glDeleteTextures(TEXTURE_COUNT, all_textures);
     glUseProgram(0); // Detach shader program if still active
     glDeleteProgram(renderer.shader.program); // Delete the shader program
 
     glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
     glfwDestroyWindow(window);
     glfwTerminate();
+    
+    printf("Engine shutdown complete.\n");
     return 0;
 }
 
@@ -904,7 +1015,7 @@ void mouse_callback(GLFWwindow* window, double xpos, double ypos) {
 void framebuffer_size_callback(GLFWwindow* window, int width, int height) {
     // Adjust the OpenGL viewport to match the new window dimensions
     glViewport(0, 0, width, height);
-
+    
     // Update camera aspect ratio
     if (height > 0) {
         global_camera.aspect_ratio = (float)width / (float)height;
