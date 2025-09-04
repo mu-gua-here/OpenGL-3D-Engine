@@ -1,8 +1,8 @@
 //
-//  main.mm
-//  OpenGL Test
+//  main.mm
+//  OpenGL Test
 //
-//  Created by Ray Hsiao Muguang on 2025/6/20.
+//  Created by Ray Hsiao Muguang on 2025/6/20.
 //
 
 #define GL_SILENCE_DEPRECATION
@@ -27,7 +27,8 @@ void framebuffer_size_callback(GLFWwindow* window, int width, int height);
 bool paused = false;
 
 // Engine
-unsigned int entity_count = 0;
+GLuint entity_count = 0;
+GLuint texture_count;
 
 // FPS counter
 double lastTime = 0.0;
@@ -49,7 +50,6 @@ void updateFPS(GLFWwindow* window) {
         char title[256];
         snprintf(title, sizeof(title), "C++ OpenGL 3D Engine - FPS: %.1f | Frame Time: %.2f ms", fps, frameTime);
         glfwSetWindowTitle(window, title);
-                
         frameCount = 0;
         lastTime = currentTime;
     }
@@ -81,13 +81,14 @@ GLuint loadTexture(const char* path) {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     
     // Upload texture data
-    GLenum format;
+    GLenum format = 0; // Initialize format
     if (channels == 1) format = GL_RED;
     else if (channels == 3) format = GL_RGB;
     else if (channels == 4) format = GL_RGBA;
     else {
-        printf("Invalid color channel format");
-        format = NULL;
+        std::cerr << "Unsupported texture format (channels: " << channels << ") for " << path << std::endl;
+        stbi_image_free(data);
+        return 0;
     }
     
     glTexImage2D(GL_TEXTURE_2D, 0, format, width, height, 0, format, GL_UNSIGNED_BYTE, data);
@@ -191,8 +192,8 @@ Mat4 mat4_rotate_x(float angle) {
     Mat4 m = mat4_identity();
     float c = cosf(angle);
     float s = sinf(angle);
-    m.m[5] = c;    m.m[6] = -s;  // Fixed sign
-    m.m[9] = s;    m.m[10] = c;  // Fixed sign
+    m.m[5] = c;    m.m[6] = -s;
+    m.m[9] = s;    m.m[10] = c;
     return m;
 }
 
@@ -201,8 +202,8 @@ Mat4 mat4_rotate_y(float angle) {
     Mat4 m = mat4_identity();
     float c = cosf(angle);
     float s = sinf(angle);
-    m.m[0] = c;    m.m[2] = -s;  // Fixed sign
-    m.m[8] = s;    m.m[10] = c;  // Fixed sign
+    m.m[0] = c;    m.m[2] = s;  // Corrected sign
+    m.m[8] = -s;   m.m[10] = c; // Corrected sign
     return m;
 }
 
@@ -211,8 +212,8 @@ Mat4 mat4_rotate_z(float angle) {
     Mat4 m = mat4_identity();
     float c = cosf(angle);
     float s = sinf(angle);
-    m.m[0] = c;    m.m[1] = -s;  // Fixed sign
-    m.m[4] = s;    m.m[5] = c;   // Fixed sign
+    m.m[0] = c;    m.m[1] = -s;
+    m.m[4] = s;    m.m[5] = c;
     return m;
 }
 
@@ -229,7 +230,7 @@ Mat4 mat4_scale(Vec3 scale) {
 Mat4 mat4_look_at(Vec3 eye, Vec3 center, Vec3 up) {
     Vec3 f = vec3_normalize(vec3_sub(center, eye)); // Forward vector
     Vec3 s = vec3_normalize(vec3_cross(f, up));      // Side vector
-    Vec3 u = vec3_cross(s, f);                      // Up vector (re-orthogonalized)
+    Vec3 u = vec3_cross(s, f);                       // Up vector (re-orthogonalized)
 
     Mat4 result = mat4_identity();
     result.m[0] = s.x;
@@ -243,20 +244,13 @@ Mat4 mat4_look_at(Vec3 eye, Vec3 center, Vec3 up) {
     result.m[10] = -f.z;
     result.m[12] = -vec3_dot(s, eye);
     result.m[13] = -vec3_dot(u, eye);
-    result.m[14] = vec3_dot(f, eye);  // Fixed sign
+    result.m[14] = vec3_dot(f, eye);
     return result;
 }
 
 // ============================================================================
 // MESH SYSTEM (3D Object representation)
 // ============================================================================
-
-typedef struct {
-    float* vertices;
-    unsigned int* indices;
-    int index_count;
-    unsigned int VAO, VBO, EBO;
-} Mesh;
 
 // UV coordinates
 typedef struct {
@@ -275,75 +269,180 @@ typedef enum {
     CULL_FRONT = 2
 } CullMode;
 
-// Triangle mesh structure
+// Template structure for pre-computed mesh data
+typedef struct {
+    const float* vertices;     // Pre-computed vertex data
+    const unsigned int* indices; // Pre-computed indices
+    int vertex_count;         // Number of floats in vertices
+    int index_count;          // Number of indices
+    int triangle_count;       // Number of triangles
+} MultiTriangleMeshTemplate;
+
+// Updated MultiTriangleMesh structure
+typedef struct {
+    float* vertices;        // Dynamic array (allocated from template)
+    unsigned int* indices;  // Dynamic array (allocated from template)
+    int vertex_count;
+    int index_count;
+    int triangle_count;
+    GLuint VAO, VBO, EBO;
+    GLuint texture_id;
+    CullMode cull_mode;
+} MultiTriangleMesh;
+
+// Mesh structure
 typedef struct {
     float vertices[36]; // 3 vertices * 12 floats per vertex (pos + color + uv + normal)
-    unsigned int indices[3]; // Always just 0, 1, 2 for a triangle
+    unsigned int indices[3];
     unsigned int VAO, VBO, EBO;
     GLuint texture_id;
     CullMode cull_mode;
-} TriangleMesh;
+} Mesh;
 
-// Create a triangle from three positions, color, texture, UVs, and culling mode
-TriangleMesh create_triangle(Vec3 pos1, Vec3 pos2, Vec3 pos3,
-                            Color color,
-                            GLuint texture_id,
-                            Vec2 uv1, Vec2 uv2, Vec2 uv3,
-                            CullMode cull_mode) {
+
+// MESH TEMPLATES //
+
+static const float CUBE_VERTICES[] = {
+    // Front face (Z = +0.5, normal = 0,0,1)
+    -0.5f, -0.5f,  0.5f,   1.0f, 1.0f, 1.0f, 1.0f,   0.0f, 0.0f,   0.0f, 0.0f, 1.0f,  // 0
+     0.5f, -0.5f,  0.5f,   1.0f, 1.0f, 1.0f, 1.0f,   1.0f, 0.0f,   0.0f, 0.0f, 1.0f,  // 1
+     0.5f,  0.5f,  0.5f,   1.0f, 1.0f, 1.0f, 1.0f,   1.0f, 1.0f,   0.0f, 0.0f, 1.0f,  // 2
+    -0.5f,  0.5f,  0.5f,   1.0f, 1.0f, 1.0f, 1.0f,   0.0f, 1.0f,   0.0f, 0.0f, 1.0f,  // 3
+
+    // Back face (Z = -0.5, normal = 0,0,-1)
+     0.5f, -0.5f, -0.5f,   1.0f, 1.0f, 1.0f, 1.0f,   0.0f, 0.0f,   0.0f, 0.0f, -1.0f, // 4
+    -0.5f, -0.5f, -0.5f,   1.0f, 1.0f, 1.0f, 1.0f,   1.0f, 0.0f,   0.0f, 0.0f, -1.0f, // 5
+    -0.5f,  0.5f, -0.5f,   1.0f, 1.0f, 1.0f, 1.0f,   1.0f, 1.0f,   0.0f, 0.0f, -1.0f, // 6
+     0.5f,  0.5f, -0.5f,   1.0f, 1.0f, 1.0f, 1.0f,   0.0f, 1.0f,   0.0f, 0.0f, -1.0f, // 7
+
+    // Left face (X = -0.5, normal = -1,0,0)
+    -0.5f, -0.5f, -0.5f,   1.0f, 1.0f, 1.0f, 1.0f,   0.0f, 0.0f,   -1.0f, 0.0f, 0.0f, // 8
+    -0.5f, -0.5f,  0.5f,   1.0f, 1.0f, 1.0f, 1.0f,   1.0f, 0.0f,   -1.0f, 0.0f, 0.0f, // 9
+    -0.5f,  0.5f,  0.5f,   1.0f, 1.0f, 1.0f, 1.0f,   1.0f, 1.0f,   -1.0f, 0.0f, 0.0f, // 10
+    -0.5f,  0.5f, -0.5f,   1.0f, 1.0f, 1.0f, 1.0f,   0.0f, 1.0f,   -1.0f, 0.0f, 0.0f, // 11
+
+    // Right face (X = +0.5, normal = 1,0,0)
+     0.5f, -0.5f,  0.5f,   1.0f, 1.0f, 1.0f, 1.0f,   0.0f, 0.0f,   1.0f, 0.0f, 0.0f,  // 12
+     0.5f, -0.5f, -0.5f,   1.0f, 1.0f, 1.0f, 1.0f,   1.0f, 0.0f,   1.0f, 0.0f, 0.0f,  // 13
+     0.5f,  0.5f, -0.5f,   1.0f, 1.0f, 1.0f, 1.0f,   1.0f, 1.0f,   1.0f, 0.0f, 0.0f,  // 14
+     0.5f,  0.5f,  0.5f,   1.0f, 1.0f, 1.0f, 1.0f,   0.0f, 1.0f,   1.0f, 0.0f, 0.0f,  // 15
+
+    // Bottom face (Y = -0.5, normal = 0,-1,0)
+    -0.5f, -0.5f, -0.5f,   1.0f, 1.0f, 1.0f, 1.0f,   0.0f, 0.0f,   0.0f, -1.0f, 0.0f, // 16
+     0.5f, -0.5f, -0.5f,   1.0f, 1.0f, 1.0f, 1.0f,   1.0f, 0.0f,   0.0f, -1.0f, 0.0f, // 17
+     0.5f, -0.5f,  0.5f,   1.0f, 1.0f, 1.0f, 1.0f,   1.0f, 1.0f,   0.0f, -1.0f, 0.0f, // 18
+    -0.5f, -0.5f,  0.5f,   1.0f, 1.0f, 1.0f, 1.0f,   0.0f, 1.0f,   0.0f, -1.0f, 0.0f, // 19
+
+    // Top face (Y = +0.5, normal = 0,1,0)
+    -0.5f,  0.5f,  0.5f,   1.0f, 1.0f, 1.0f, 1.0f,   0.0f, 0.0f,   0.0f, 1.0f, 0.0f,  // 20
+     0.5f,  0.5f,  0.5f,   1.0f, 1.0f, 1.0f, 1.0f,   1.0f, 0.0f,   0.0f, 1.0f, 0.0f,  // 21
+     0.5f,  0.5f, -0.5f,   1.0f, 1.0f, 1.0f, 1.0f,   1.0f, 1.0f,   0.0f, 1.0f, 0.0f,  // 22
+    -0.5f,  0.5f, -0.5f,   1.0f, 1.0f, 1.0f, 1.0f,   0.0f, 1.0f,   0.0f, 1.0f, 0.0f   // 23
+};
+
+// Indices for 12 triangles (2 per face * 6 faces)
+static const unsigned int CUBE_INDICES[] = {
+    // Front face
+    0, 1, 2,   2, 3, 0,
+    // Back face
+    4, 5, 6,   6, 7, 4,
+    // Left face
+    8, 9, 10,  10, 11, 8,
+    // Right face
+    12, 13, 14, 14, 15, 12,
+    // Bottom face
+    16, 17, 18, 18, 19, 16,
+    // Top face
+    20, 21, 22, 22, 23, 20
+};
+
+// Template definition
+static const MultiTriangleMeshTemplate CUBE_TEMPLATE = {
+    .vertices = CUBE_VERTICES,
+    .indices = CUBE_INDICES,
+    .vertex_count = sizeof(CUBE_VERTICES) / sizeof(float),  // 288 floats (24 vertices * 12)
+    .index_count = sizeof(CUBE_INDICES) / sizeof(unsigned int), // 36 indices
+    .triangle_count = 12
+};
+
+// Mesh creation
+MultiTriangleMesh create_cube(Vec3 center, float size, Color color, GLuint texture_id, bool inward_normals) {
+    MultiTriangleMesh mesh = copy_template(&CUBE_TEMPLATE); // Single memcpy
+    transform_mesh_vertices(&mesh, center, size, color, inward_normals); // In-place transform
+    mesh.texture_id = texture_id;
+    mesh.cull_mode = inward_normals ? CULL_FRONT : CULL_BACK;
+    finalize_multi_triangle_mesh(&mesh);
+    return mesh;
+}
+
+MultiTriangleMesh copy_mesh_template(const MultiTriangleMeshTemplate* template) {
+    MultiTriangleMesh mesh = {0};
     
-    TriangleMesh triangle;
-    triangle.texture_id = texture_id;
-    triangle.cull_mode = cull_mode;
+    mesh.vertex_count = template->vertex_count;
+    mesh.index_count = template->index_count;
+    mesh.triangle_count = template->triangle_count;
     
-    // Calculate face normal using cross product
-    Vec3 edge1 = vec3_sub(pos2, pos1);
-    Vec3 edge2 = vec3_sub(pos3, pos1);
-    Vec3 normal = vec3_normalize(vec3_cross(edge1, edge2));
+    // Allocate memory for mesh data
+    mesh.vertices = (float*)malloc(mesh.vertex_count * sizeof(float));
+    mesh.indices = (unsigned int*)malloc(mesh.index_count * sizeof(unsigned int));
     
-    // Build vertex data array: position(3) + color(4) + uvs(2) + normals(3) = 12 floats per vertex
-    float vertices[] = {
-        // Vertex 1
-        pos1.x, pos1.y, pos1.z,           // Position
-        color.r, color.g, color.b, color.a, // Color
-        uv1.u, uv1.v,                     // UV coordinates
-        normal.x, normal.y, normal.z,     // Normal
+    // Single fast memory copy
+    memcpy(mesh.vertices, template->vertices, mesh.vertex_count * sizeof(float));
+    memcpy(mesh.indices, template->indices, mesh.index_count * sizeof(unsigned int));
+    
+    return mesh;
+}
+
+// Transform mesh vertices in-place (position, scale, color, normals)
+void transform_mesh_vertices(MultiTriangleMesh* mesh, Vec3 center, float size, Color color, bool invert_normals) {
+    float normal_mult = invert_normals ? -1.0f : 1.0f;
+    
+    for (int i = 0; i < mesh->vertex_count; i += 12) {
+        // Transform position: scale then translate
+        mesh->vertices[i + 0] = mesh->vertices[i + 0] * size + center.x;
+        mesh->vertices[i + 1] = mesh->vertices[i + 1] * size + center.y;
+        mesh->vertices[i + 2] = mesh->vertices[i + 2] * size + center.z;
         
-        // Vertex 2
-        pos2.x, pos2.y, pos2.z,           // Position
-        color.r, color.g, color.b, color.a, // Color
-        uv2.u, uv2.v,                     // UV coordinates
-        normal.x, normal.y, normal.z,     // Normal
+        // Set color
+        mesh->vertices[i + 3] = color.r;
+        mesh->vertices[i + 4] = color.g;
+        mesh->vertices[i + 5] = color.b;
+        mesh->vertices[i + 6] = color.a;
         
-        // Vertex 3
-        pos3.x, pos3.y, pos3.z,           // Position
-        color.r, color.g, color.b, color.a, // Color
-        uv3.u, uv3.v,                     // UV coordinates
-        normal.x, normal.y, normal.z      // Normal
-    };
-    
-    // Copy vertices to triangle structure
-    for (int i = 0; i < 36; i++) {
-        triangle.vertices[i] = vertices[i];
+        // UV coordinates stay the same (i+7, i+8)
+        
+        // Transform normals if needed (for skybox)
+        if (invert_normals) {
+            mesh->vertices[i + 9] *= normal_mult;
+            mesh->vertices[i + 10] *= normal_mult;
+            mesh->vertices[i + 11] *= normal_mult;
+        }
+    }
+}
+
+
+void finalize_multi_triangle_mesh(MultiTriangleMesh* mesh) {
+    if (mesh->triangle_count == 0) {
+        printf("Warning: Finalizing empty mesh\n");
+        return;
     }
     
-    triangle.indices[0] = 0;
-    triangle.indices[1] = 1;
-    triangle.indices[2] = 2;
-    
     // Create OpenGL buffers
-    glGenVertexArrays(1, &triangle.VAO);
-    glGenBuffers(1, &triangle.VBO);
-    glGenBuffers(1, &triangle.EBO);
+    glGenVertexArrays(1, &mesh->VAO);
+    glGenBuffers(1, &mesh->VBO);
+    glGenBuffers(1, &mesh->EBO);
     
-    glBindVertexArray(triangle.VAO);
+    glBindVertexArray(mesh->VAO);
     
-    glBindBuffer(GL_ARRAY_BUFFER, triangle.VBO);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
+    // Upload vertex data
+    glBindBuffer(GL_ARRAY_BUFFER, mesh->VBO);
+    glBufferData(GL_ARRAY_BUFFER, mesh->vertex_count * sizeof(float), mesh->vertices, GL_STATIC_DRAW);
     
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, triangle.EBO);
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(triangle.indices), triangle.indices, GL_STATIC_DRAW);
+    // Upload index data
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, mesh->EBO);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, mesh->index_count * sizeof(unsigned int), mesh->indices, GL_STATIC_DRAW);
     
-    // Set up vertex attributes (same as your cube setup)
+    // Set up vertex attributes (same layout as your existing triangle mesh)
     // Position attribute (location 0)
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 12 * sizeof(float), (void*)0);
     glEnableVertexAttribArray(0);
@@ -362,33 +461,11 @@ TriangleMesh create_triangle(Vec3 pos1, Vec3 pos2, Vec3 pos3,
     
     glBindVertexArray(0);
     
-    return triangle;
+    printf("Finalized mesh: %d triangles, %d vertices, %d indices\n",
+           mesh->triangle_count, mesh->vertex_count/12, mesh->index_count);
 }
 
-// Updated entity system to work with triangles
-typedef struct {
-    Vec3 position;
-    Vec3 rotation;
-    Vec3 scale;
-    TriangleMesh* triangle_mesh; // Use triangle mesh instead of general mesh
-    int active;
-} TriangleEntity;
-
-// Create triangle entity
-TriangleEntity create_entity(TriangleMesh* triangle_mesh, Vec3 pos) {
-    TriangleEntity entity;
-    entity.position = pos;
-    entity.rotation = (Vec3){0, 0, 0};
-    entity.scale = (Vec3){1, 1, 1};
-    entity.triangle_mesh = triangle_mesh;
-    entity.active = 1;
-    return entity;
-}
-
-// ============================================================================
-// ENTITY SYSTEM (Game objects in 3D space)
-// ============================================================================
-
+// Entity structure
 typedef struct {
     Vec3 position;
     Vec3 rotation;
@@ -397,7 +474,7 @@ typedef struct {
     int active;
 } Entity;
 
-// Create a new entity
+// Create triangle entity
 Entity create_entity(Mesh* mesh, Vec3 pos) {
     Entity entity;
     entity.position = pos;
@@ -440,7 +517,7 @@ Camera create_camera(float aspect) {
     cam.yaw = -90.0f;
     cam.pitch = 0.0f;
 
-    cam.fov = 3.14159f / 4.0f; // 45 degrees in radians
+    cam.fov = M_PI / 4.0f; // 45 degrees in radians
     cam.aspect_ratio = aspect;
     cam.near_plane = 0.1f;
     cam.far_plane = 100.0f;
@@ -490,9 +567,9 @@ const char* vertex_shader = "#version 330 core\n"
     "out vec2 TexCoord;\n"
     "uniform mat4 uMVP;\n"
     "void main() {\n"
-    "   gl_Position = uMVP * vec4(aPos, 1.0);\n"
-    "   vertexColor = aColor;\n"
-    "   TexCoord = aTexCoord;\n"
+    "    gl_Position = uMVP * vec4(aPos, 1.0);\n"
+    "    vertexColor = aColor;\n"
+    "    TexCoord = aTexCoord;\n"
     "}\0";
 
 const char* fragment_shader = "#version 330 core\n"
@@ -552,7 +629,6 @@ Shader create_shader() {
     shader.mvp_location = glGetUniformLocation(program, "uMVP");
     shader.texture_location = glGetUniformLocation(program, "u_texture");
 
-
     return shader;
 }
 
@@ -566,18 +642,18 @@ typedef struct {
 
 void renderer_init(Renderer* renderer, float aspect) {
     renderer->shader = create_shader();
-    global_camera = create_camera(aspect); // Initialize global camera here
+    global_camera = create_camera(aspect);
 
     glEnable(GL_DEPTH_TEST);
     glDepthFunc(GL_LESS);
 }
 
 // Render function for triangle entities
-void renderer_draw_triangle(Renderer* renderer, TriangleEntity* entity) {
+void renderer_draw_triangle(Renderer* renderer, Entity* entity) {
     if (!entity->active) return;
     
     // Set up culling based on triangle's cull mode
-    switch (entity->triangle_mesh->cull_mode) {
+    switch (entity->mesh->cull_mode) {
         case CULL_NONE:
             glDisable(GL_CULL_FACE);
             break;
@@ -591,7 +667,7 @@ void renderer_draw_triangle(Renderer* renderer, TriangleEntity* entity) {
             break;
     }
     
-    // Same transformation logic as your existing renderer
+    // Transformation logic
     Mat4 scale_matrix = mat4_scale(entity->scale);
     Mat4 rotation_x = mat4_rotate_x(entity->rotation.x);
     Mat4 rotation_y = mat4_rotate_y(entity->rotation.y);
@@ -610,20 +686,23 @@ void renderer_draw_triangle(Renderer* renderer, TriangleEntity* entity) {
     
     // Bind the triangle's specific texture
     glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, entity->triangle_mesh->texture_id);
+    glBindTexture(GL_TEXTURE_2D, entity->mesh->texture_id);
     glUniform1i(renderer->shader.texture_location, 0);
     
     // Draw the triangle
-    glBindVertexArray(entity->triangle_mesh->VAO);
+    glBindVertexArray(entity->mesh->VAO);
     glDrawElements(GL_TRIANGLES, 3, GL_UNSIGNED_INT, 0);
     glBindVertexArray(0);
 }
 
 // Cleanup function for triangle mesh
-void cleanup_triangle_mesh(TriangleMesh* triangle) {
-    glDeleteVertexArrays(1, &triangle->VAO);
-    glDeleteBuffers(1, &triangle->VBO);
-    glDeleteBuffers(1, &triangle->EBO);
+void cleanup_triangle_mesh(Mesh* triangle) {
+    if (triangle->VAO != 0) glDeleteVertexArrays(1, &triangle->VAO);
+    if (triangle->VBO != 0) glDeleteBuffers(1, &triangle->VBO);
+    if (triangle->EBO != 0) glDeleteBuffers(1, &triangle->EBO);
+    triangle->VAO = 0; // Set to 0 to prevent double-deletion
+    triangle->VBO = 0;
+    triangle->EBO = 0;
 }
 
 // ============================================================================
@@ -657,24 +736,56 @@ int main() {
     renderer_init(&renderer, 800.0f / 600.0f);
     camera_update_vectors(&global_camera);
     
-    // LOAD ALL TEXTURES
+    // Check for shader errors immediately after creation
+    if (renderer.shader.program == 0) {
+        printf("Shader program creation failed. Exiting.\n");
+        glfwDestroyWindow(window);
+        glfwTerminate();
+        return -1;
+    } else {
+        printf("Shader program created successfully. Program ID: %u\n", renderer.shader.program);
+    }
     
-    GLuint all_textures[] = {0};
-    all_textures[0] = loadTexture("container.jpg");
     
-    // Create some 3D objects
+    // LOAD ALL TEXTURES //
     
-    TriangleMesh triangle_mesh = create_triangle((Vec3) {0, 0, 0}, (Vec3) {1, 0, 0}, (Vec3) {1, 1, 0}, {1, 1, 1, 1}, all_textures[0], (Vec2) {0, 0}, (Vec2) {1, 0}, (Vec2) {1, 1}, CULL_BACK);
+    texture_count = 3;
+    GLuint all_textures[texture_count];
+    all_textures[0] = loadTexture("concrete_ground_texture.jpg");
+    all_textures[1] = loadTexture("brick_wall_texture.jpg");
     
-    TriangleEntity entities[2];
-    entities[0] = create_entity(&triangle_mesh, (Vec3){0, 0, 0});
-    entities[1] = create_entity(&triangle_mesh, (Vec3){3, 0, 0});
+    // Skybox
+    all_textures[2] = loadTexture("mountain_skybox.png");
     
+    
+    // CREATE ALL SCENE OBJECTS //
+    
+    Mesh mesh = create_triangle((Vec3) {0, 0, 0}, (Vec3) {1, 0, 0}, (Vec3) {1, 1, 0}, {1, 1, 1, 1}, all_textures[1], (Vec2) {0, 0}, (Vec2) {1, 0}, (Vec2) {1, 1}, CULL_NONE);
+    
+    // Verify the VAO for the mesh
+    if (mesh.VAO == 0) {
+        printf("Mesh VAO creation failed. Exiting.\n");
+        glfwDestroyWindow(window);
+        glDeleteTextures(texture_count, all_textures); // Clean up texture
+        glDeleteProgram(renderer.shader.program); // Clean up shader
+        glfwTerminate();
+        return -1;
+    } else {
+        printf("Mesh VAO created successfully. VAO ID: %u\n", mesh.VAO);
+    }
+    
+    Entity entities[1];
+    for (unsigned int i = 0; i < 1; i++) {
+        entities[i] = create_entity(&mesh, (Vec3){float(i * 3), 0.0f, 0.0f});
+    }
+
     printf("3D Engine initialized!\n");
-    printf("3D Objects: %d cubes\n", entity_count);
+    printf("3D Objects: %d game objects\n", entity_count);
     printf("Controls: WASD to move, mouse to look around, E/Q to move up/down, ESC to exit\n");
     
-    // Main render loop
+    
+    // ENGINE MAIN LOOP //
+    
     while (!glfwWindowShouldClose(window)) {
         glfwPollEvents(); // This processes events and calls mouse_callback
         updateFPS(window);
@@ -682,20 +793,20 @@ int main() {
         if (paused == false) {
             // Keyboard input for camera movement
             float camera_speed = 0.05f;
-            if (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS) {
+            if (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_RIGHT_SHIFT) == GLFW_PRESS) {
                 camera_speed *= 2;
             }
             if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) {
                 global_camera.position = vec3_add(global_camera.position, vec3_scale(global_camera.front, camera_speed));
             }
             if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) {
-                global_camera.position = vec3_sub(global_camera.position, vec3_scale(global_camera.front, camera_speed));
+                global_camera.position = vec3_sub(global_camera.position, vec3_scale(Vec3(global_camera.front.x, 0, global_camera.front.z), camera_speed));
             }
             if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) {
-                global_camera.position = vec3_sub(global_camera.position, vec3_scale(global_camera.right, camera_speed));
+                global_camera.position = vec3_sub(global_camera.position, vec3_scale(Vec3(global_camera.right.x, 0, global_camera.right.z), camera_speed));
             }
             if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) {
-                global_camera.position = vec3_add(global_camera.position, vec3_scale(global_camera.right, camera_speed));
+                global_camera.position = vec3_add(global_camera.position, vec3_scale(Vec3(global_camera.right.x, 0, global_camera.right.z), camera_speed));
             }
             if (glfwGetKey(window, GLFW_KEY_E) == GLFW_PRESS) {
                 global_camera.position.y += camera_speed;
@@ -703,19 +814,13 @@ int main() {
             if (glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS) {
                 global_camera.position.y -= camera_speed;
             }
-            
-            // Update entities
-            float time = glfwGetTime();
-            for (unsigned int i = 0; i < entity_count; i++) {
-                entities[i].rotation.x = time * 0.5f;
-            }
         }
 
         glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-        // Render all entities
-        for (int i = 0; i < 2; i++) {
+        // RENDER ALL ENTITIES
+        for (int i = 0; i < entity_count; i++) {
             renderer_draw_triangle(&renderer, &entities[i]);
         }
 
@@ -735,8 +840,15 @@ int main() {
             }
         }
     }
+    
+    // Clean up OpenGL resources before destroying the GLFW context
+    cleanup_triangle_mesh(&mesh);
+    glDeleteTextures(texture_count, all_textures);
+    glUseProgram(0); // Detach shader program if still active
+    glDeleteProgram(renderer.shader.program); // Delete the shader program
 
     glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+    glfwDestroyWindow(window);
     glfwTerminate();
     return 0;
 }
