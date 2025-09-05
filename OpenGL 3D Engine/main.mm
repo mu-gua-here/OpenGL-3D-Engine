@@ -25,10 +25,8 @@ void framebuffer_size_callback(GLFWwindow* window, int width, int height);
 // ============================================================================
 
 // Runtime
+double fps;
 bool paused = false;
-
-// Engine
-GLuint ENTITY_COUNT = 0;
 
 // Global mesh registry for cleanup
 std::vector<class Mesh*> global_mesh_registry;
@@ -48,7 +46,7 @@ void updateFPS(GLFWwindow* window) {
     
     // Update FPS counter every second
     if (currentTime - lastTime >= 1.0) {
-        double fps = frameCount / (currentTime - lastTime);
+        fps = frameCount / (currentTime - lastTime);
         
         char title[256];
         snprintf(title, sizeof(title), "C++ OpenGL 3D Engine - FPS: %.1f | Frame Time: %.2f ms", fps, frameTime);
@@ -357,8 +355,6 @@ public:
 
 // Global cleanup function
 void cleanup_all_meshes() {
-    printf("Cleaning up %zu meshes...\n", global_mesh_registry.size());
-    
     // Clean up all registered meshes
     for (auto* mesh : global_mesh_registry) {
         if (mesh) {
@@ -368,7 +364,6 @@ void cleanup_all_meshes() {
     
     // Clear the registry
     global_mesh_registry.clear();
-    printf("All meshes cleaned up successfully.\n");
 }
 
 // PRE-COMPUTED CUBE TEMPLATE DATA //
@@ -535,10 +530,6 @@ void finalize_multi_triangle_mesh(Mesh* mesh) {
     glEnableVertexAttribArray(3);
     
     glBindVertexArray(0);
-    
-    printf("Finalized mesh: %d triangles, %d vertices, %d indices, VAO: %u\n",
-           mesh->TRIANGLE_COUNT, mesh->vertex_count/12, mesh->index_count, mesh->VAO);
-    ENTITY_COUNT += 1;
 }
 
 // ============================================================================
@@ -833,8 +824,6 @@ int main() {
         glfwDestroyWindow(window);
         glfwTerminate();
         return -1;
-    } else {
-        printf("Shader program created successfully. Program ID: %u\n", renderer.shader.program);
     }
     
     // ============================================================================
@@ -850,8 +839,10 @@ int main() {
     // CREATE ALL SCENE OBJECTS
     // ============================================================================
     
+    // Load all meshes
+    
     Mesh* all_meshes[3];
-    all_meshes[SKYBOX_MESH] = create_skybox_mesh((Vec3){0, 0, 0}, 1000.0f, (Color){1, 1, 1, 1}, all_textures[MOUNTAIN_SKYBOX]);
+    all_meshes[SKYBOX_MESH] = create_skybox_mesh((Vec3){0, 0, 0}, 10.0f, (Color){1, 1, 1, 1}, all_textures[MOUNTAIN_SKYBOX]);
     all_meshes[CONCRETE_FLOOR_MESH] = create_cube_mesh((Vec3){0, 0, 0}, 2.0f, (Color){1, 1, 1, 1}, all_textures[CONCRETE_GROUND]);
     all_meshes[BRICK_WALL_MESH] = create_cube_mesh((Vec3){0, 0, 0}, 2.0f, (Color){1, 1, 1, 1}, all_textures[BRICK_WALL]);
     
@@ -862,21 +853,19 @@ int main() {
             printf("Mesh %d creation failed. Exiting.\n", i);
             all_meshes_valid = false;
             break;
-        } else {
-            printf("Mesh %d created successfully. VAO: %u, Triangles: %d\n",
-                   i, all_meshes[i]->getVAO(), all_meshes[i]->TRIANGLE_COUNT);
         }
     }
     
-    // Create entities
+    // Create all scene entities
+    
     std::vector<Entity> all_entities;
     all_entities.push_back(create_entity(all_meshes[SKYBOX_MESH], (Vec3){0, 0, 0}));
-    all_entities.push_back(create_entity(all_meshes[CONCRETE_FLOOR_MESH], (Vec3){0, 0, 0}));
-    all_entities.push_back(create_entity(all_meshes[BRICK_WALL_MESH], (Vec3){5, 0, 0}));
-
-    printf("3D Engine initialized!\n");
-    printf("Total registered meshes: %zu\n", global_mesh_registry.size());
-    printf("3D Objects: %d game objects\n", ENTITY_COUNT);
+    for (GLuint i = 0; i < 2; i++) {
+        all_entities.push_back(create_entity(all_meshes[i % 2 + 1], (Vec3){0, 0, float(i) * -5}));
+    }
+    
+    printf("Meshes: %zu registered meshes\n", global_mesh_registry.size());
+    printf("Objects: %zu game objects\n", all_entities.size());
     printf("Controls: WASD to move, mouse to look around, E/Q to move up/down, ESC to exit\n");
     
     // ENGINE MAIN LOOP //
@@ -887,21 +876,27 @@ int main() {
         
         if (paused == false) {
             // Keyboard input for camera movement
+            
+            float yaw_rad = global_camera.yaw * M_PI / 180.0f;
+            float sin_yaw = sinf(yaw_rad);
+            float cos_yaw = cosf(yaw_rad);
+            Vec3 cam_offset = {0, 0, 0};
+            
             float camera_speed = 0.05f;
             if (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_RIGHT_SHIFT) == GLFW_PRESS) {
                 camera_speed *= 2;
             }
             if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) {
-                global_camera.position = vec3_add(global_camera.position, vec3_scale((Vec3){global_camera.front.x, 0, global_camera.front.z}, camera_speed));
+                cam_offset = vec3_add(cam_offset, (Vec3){cos_yaw, 0, sin_yaw});
             }
             if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) {
-                global_camera.position = vec3_sub(global_camera.position, vec3_scale((Vec3){global_camera.front.x, 0, global_camera.front.z}, camera_speed));
+                cam_offset = vec3_add(cam_offset, (Vec3){-cos_yaw, 0, -sin_yaw});
             }
             if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) {
-                global_camera.position = vec3_sub(global_camera.position, vec3_scale((Vec3){global_camera.right.x, 0, global_camera.right.z}, camera_speed));
+                cam_offset = vec3_add(cam_offset, (Vec3){sin_yaw, 0, -cos_yaw});
             }
             if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) {
-                global_camera.position = vec3_add(global_camera.position, vec3_scale((Vec3){global_camera.right.x, 0, global_camera.right.z}, camera_speed));
+                cam_offset = vec3_add(cam_offset, (Vec3){-sin_yaw, 0, cos_yaw});
             }
             if (glfwGetKey(window, GLFW_KEY_E) == GLFW_PRESS) {
                 global_camera.position.y += camera_speed;
@@ -909,6 +904,17 @@ int main() {
             if (glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS) {
                 global_camera.position.y -= camera_speed;
             }
+            cam_offset = vec3_normalize(cam_offset);
+            global_camera.position = vec3_add(global_camera.position, vec3_scale(cam_offset, camera_speed));
+            
+            // ============================================================================
+            // UPDATE ENTITIES
+            // ============================================================================
+            
+            // Spinning brick cube
+            all_entities[BRICK_WALL_MESH].rotation.x += 0.01f;
+            all_entities[BRICK_WALL_MESH].rotation.y += 0.01f;
+            all_entities[BRICK_WALL_MESH].rotation.z += 0.01f;
         }
 
         glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
@@ -922,15 +928,13 @@ int main() {
         // Render skybox first
         glDepthMask(GL_FALSE);
         all_entities[0].position = global_camera.position; // Follow camera
-        draw_mesh(&renderer, &all_entities[0], all_meshes[SKYBOX_MESH]);
+        draw_mesh(&renderer, &all_entities[SKYBOX_MESH], all_meshes[SKYBOX_MESH]);
         glDepthMask(GL_TRUE);
         
         // Render regular objects
-        draw_mesh(&renderer, &all_entities[1], all_meshes[CONCRETE_FLOOR_MESH]);
-        
-        all_entities[2].rotation.y = glfwGetTime(); // Spinning cube
-        draw_mesh(&renderer, &all_entities[2], all_meshes[BRICK_WALL_MESH]);
-
+        for (GLuint i = 0; i < all_entities.size(); i++) {
+            draw_mesh(&renderer, &all_entities[i], all_entities[i].mesh);
+        }
         glfwSwapBuffers(window);
 
         // Set cursor modes
@@ -959,8 +963,6 @@ int main() {
     glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
     glfwDestroyWindow(window);
     glfwTerminate();
-    
-    printf("Engine shutdown complete.\n");
     return 0;
 }
 
@@ -974,14 +976,12 @@ void mouse_callback(GLFWwindow* window, double xpos, double ypos) {
     static double lastY = 300.0;
     static bool firstMouse = true; // Flag to handle the initial jump when pointer lock starts
     
-    if (glfwGetInputMode(window, GLFW_CURSOR) != GLFW_CURSOR_DISABLED) return;
-
     if (firstMouse) {
         lastX = xpos;
         lastY = ypos;
         firstMouse = false;
     }
-
+    
     // Calculate the offset from the last frame
     double xoffset = xpos - lastX;
     double yoffset = lastY - ypos; // Inverted Y-axis
@@ -990,11 +990,13 @@ void mouse_callback(GLFWwindow* window, double xpos, double ypos) {
     lastX = xpos;
     lastY = ypos;
 
+    if (glfwGetInputMode(window, GLFW_CURSOR) != GLFW_CURSOR_DISABLED) return;
+
     // Apply sensitivity to mouse movement
     float sensitivity = 0.1f;
     xoffset *= sensitivity;
     yoffset *= sensitivity;
-
+    
     // Update camera's yaw and pitch
     global_camera.yaw += xoffset;
     global_camera.pitch += yoffset;
