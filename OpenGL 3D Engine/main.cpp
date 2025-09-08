@@ -30,7 +30,7 @@ double fps;
 bool paused = false;
 
 // Engine variables
-GLuint total_triangles = 0;
+unsigned int total_triangles = 0;
 
 // Global mesh registry for cleanup
 std::vector<class Mesh*> global_mesh_registry;
@@ -433,7 +433,7 @@ static const float SKYBOX_VERTICES[] = {
 };
 
 // ============================================================================
-// OBJ AND MTL PARSERS
+// OBJ AND MTL FILE IMPORTERS
 // ============================================================================
 
 typedef struct {
@@ -500,7 +500,8 @@ OBJModel* loadOBJ(const char* filename, const char* mtl_path = nullptr) {
         }
     }
     
-    model->materialCount = std::max(1, (int)materials.size());
+    // Include default + found materials
+    model->materialCount = 1 + materials.size();
     
     // Allocate memory
     model->vertices = (Vec3*)malloc(model->vertexCount * sizeof(Vec3));
@@ -510,12 +511,12 @@ OBJModel* loadOBJ(const char* filename, const char* mtl_path = nullptr) {
     model->materials = (Material*)malloc(model->materialCount * sizeof(Material));
     model->face_materials = (int*)malloc((model->faceCount / 3) * sizeof(int));
     
-    // Initialize materials array with the unique materials we found
+    // Initialize materials array with default first, then unique materials
     strcpy(model->materials[0].name, "default");
     model->materials[0].texture_id = 0;
     model->materials[0].diffuse_color = (Color){1.0f, 1.0f, 1.0f, 1.0f};
     
-    for (int i = 0; i < materials.size() && i + 1 < model->materialCount; i++) {
+    for (int i = 0; i < materials.size(); i++) {
         strcpy(model->materials[i + 1].name, materials[i].c_str());
         model->materials[i + 1].texture_id = 0;
         model->materials[i + 1].diffuse_color = (Color){1.0f, 1.0f, 1.0f, 1.0f};
@@ -526,7 +527,6 @@ OBJModel* loadOBJ(const char* filename, const char* mtl_path = nullptr) {
     int vIndex = 0, vtIndex = 0, vnIndex = 0, fIndex = 0;
     int current_material = 0;
     int face_count = 0;
-    int materialIndex = 0;
     
     while (fgets(line, sizeof(line), file)) {
         if (strncmp(line, "v ", 2) == 0) {
@@ -553,30 +553,20 @@ OBJModel* loadOBJ(const char* filename, const char* mtl_path = nullptr) {
             char mtl_name[256];
             sscanf(line, "usemtl %s", mtl_name);
             
-            // Find the material in our pre-allocated array
+            // Find the material in pre-allocated array
             bool found = false;
             for (int i = 0; i < model->materialCount; i++) {
                 if (strcmp(model->materials[i].name, mtl_name) == 0) {
                     current_material = i;
                     found = true;
-                    printf("Switching to material %d: %s\n", i, mtl_name);
                     break;
                 }
             }
             
             if (!found) {
-                if (materialIndex + 1 < model->materialCount) {
-                    materialIndex++;
-                    strcpy(model->materials[materialIndex].name, mtl_name);
-                    model->materials[materialIndex].texture_id = 0;
-                    model->materials[materialIndex].diffuse_color = (Color){1.0f, 1.0f, 1.0f, 1.0f};
-                    current_material = materialIndex;
-                } else {
-                    printf("WARNING: Too many materials (%d max), using material 0 for %s\n",
-                            model->materialCount, mtl_name);
-                    current_material = 0;
-                    }
-                }
+                printf("WARNING: Material %s not found, using default\n", mtl_name);
+                current_material = 0;
+            }
         }
         else if (strncmp(line, "f ", 2) == 0) {
             // Parse face and assign current material
@@ -630,7 +620,6 @@ OBJModel* loadOBJ(const char* filename, const char* mtl_path = nullptr) {
     
     return model;
 }
-
 // Function to parse MTL file
 void loadMTL(const char* mtl_path, Material* materials, int* material_count, int max_materials) {
     FILE* file = fopen(mtl_path, "r");
@@ -728,10 +717,21 @@ std::vector<Mesh*> create_mesh_with_obj(const char* obj_path, Vec3 center, float
         
     std::vector<Mesh*> meshes;
     
-    // Create separate mesh for each material (same logic as before)
+    // Create separate mesh for each material
     for (int mat_idx = 0; mat_idx < model->materialCount; mat_idx++) {
         std::vector<float> vertices;
         int triangle_count = 0;
+        int total_triangles_for_material = 0;
+        
+        // First pass: count triangles for this material
+        for (int face_idx = 0; face_idx < model->faceCount / 3; face_idx++) {
+            if (model->face_materials[face_idx] == mat_idx) {
+                total_triangles_for_material++;
+            }
+        }
+        
+        printf("Material %d (%s): Processing %d triangles\n",
+               mat_idx, model->materials[mat_idx].name, total_triangles_for_material);
         
         // Collect all faces that use this material
         for (int face_idx = 0; face_idx < model->faceCount / 3; face_idx++) {
@@ -740,6 +740,14 @@ std::vector<Mesh*> create_mesh_with_obj(const char* obj_path, Vec3 center, float
                 for (int v = 0; v < 3; v++) {
                     int vertex_idx = face_idx * 3 + v;
                     FaceVertex* face = &model->faces[vertex_idx];
+                    
+                    // Bounds checking
+                    if (face->v >= model->vertexCount || face->vt >= model->texCoordCount || face->vn >= model->normalCount) {
+                        printf("WARNING: Face %d vertex %d has invalid indices: v=%d vt=%d vn=%d (max: v=%d vt=%d vn=%d)\n",
+                               face_idx, v, face->v, face->vt, face->vn,
+                               model->vertexCount-1, model->texCoordCount-1, model->normalCount-1);
+                        continue;
+                    }
                     
                     // Position (transformed)
                     Vec3 pos = model->vertices[face->v];
@@ -754,28 +762,20 @@ std::vector<Mesh*> create_mesh_with_obj(const char* obj_path, Vec3 center, float
                     vertices.push_back(model->materials[mat_idx].diffuse_color.a);
                     
                     // Texture coordinates
-                    if (face->vt < model->texCoordCount) {
-                        vertices.push_back(model->texCoords[face->vt].u);
-                        vertices.push_back(model->texCoords[face->vt].v);
-                    } else {
-                        vertices.push_back(0.0f);
-                        vertices.push_back(0.0f);
-                    }
+                    vertices.push_back(model->texCoords[face->vt].u);
+                    vertices.push_back(model->texCoords[face->vt].v);
                     
                     // Normals
-                    if (face->vn < model->normalCount) {
-                        vertices.push_back(model->normals[face->vn].x);
-                        vertices.push_back(model->normals[face->vn].y);
-                        vertices.push_back(model->normals[face->vn].z);
-                    } else {
-                        vertices.push_back(0.0f);
-                        vertices.push_back(1.0f);
-                        vertices.push_back(0.0f);
-                    }
+                    vertices.push_back(model->normals[face->vn].x);
+                    vertices.push_back(model->normals[face->vn].y);
+                    vertices.push_back(model->normals[face->vn].z);
                 }
                 triangle_count++;
             }
         }
+        
+        printf("Material %d: Expected %d triangles, actually processed %d triangles\n",
+               mat_idx, total_triangles_for_material, triangle_count);
         
         // Only create mesh if it has vertices
         if (triangle_count > 0) {
@@ -799,6 +799,12 @@ std::vector<Mesh*> create_mesh_with_obj(const char* obj_path, Vec3 center, float
             glBindBuffer(GL_ARRAY_BUFFER, mesh->VBO);
             glBufferData(GL_ARRAY_BUFFER, mesh->vertex_count * sizeof(float), mesh->vertices, GL_STATIC_DRAW);
             
+            // Check for OpenGL errors
+            GLenum error = glGetError();
+            if (error != GL_NO_ERROR) {
+                printf("OpenGL error after buffer upload for material %d: %d\n", mat_idx, error);
+            }
+            
             glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 12 * sizeof(float), (void*)0);
             glEnableVertexAttribArray(0);
             glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, 12 * sizeof(float), (void*)(3 * sizeof(float)));
@@ -809,9 +815,11 @@ std::vector<Mesh*> create_mesh_with_obj(const char* obj_path, Vec3 center, float
             glEnableVertexAttribArray(3);
             
             glBindVertexArray(0);
-            
-            total_triangles += mesh->TRIANGLE_COUNT;
             meshes.push_back(mesh);
+            total_triangles += mesh->TRIANGLE_COUNT;
+            
+            printf("Created mesh for material %d (%s): %d triangles, %zu vertices\n",
+                   mat_idx, model->materials[mat_idx].name, mesh->TRIANGLE_COUNT, mesh->vertex_count);
         }
     }
     
@@ -825,52 +833,6 @@ std::vector<Mesh*> create_mesh_with_obj(const char* obj_path, Vec3 center, float
     free(model);
     
     return meshes;
-}
-
-// Function to convert OBJ data to OpenGL vertex array
-float* objToVertexArray(OBJModel* model, int* vertexCount) {
-    *vertexCount = model->faceCount;
-    
-    // Each vertex: 3 pos + 4 color + 2 texcoord + 3 normal = 12 floats (to match your existing format)
-    float* vertices = (float*)malloc(model->faceCount * 12 * sizeof(float));
-    
-    for (int i = 0; i < model->faceCount; i++) {
-        FaceVertex* face = &model->faces[i];
-        int baseIndex = i * 12;
-        
-        // Position
-        vertices[baseIndex + 0] = model->vertices[face->v].x;
-        vertices[baseIndex + 1] = model->vertices[face->v].y;
-        vertices[baseIndex + 2] = model->vertices[face->v].z;
-        
-        // Color (default white)
-        vertices[baseIndex + 3] = 1.0f; // R
-        vertices[baseIndex + 4] = 1.0f; // G
-        vertices[baseIndex + 5] = 1.0f; // B
-        vertices[baseIndex + 6] = 1.0f; // A
-        
-        // Texture coordinates
-        vertices[baseIndex + 7] = model->texCoords[face->vt].u;
-        vertices[baseIndex + 8] = model->texCoords[face->vt].v;
-        
-        // Normals
-        vertices[baseIndex + 9] = model->normals[face->vn].x;
-        vertices[baseIndex + 10] = model->normals[face->vn].y;
-        vertices[baseIndex + 11] = model->normals[face->vn].z;
-    }
-    
-    return vertices;
-}
-
-// Function to free OBJ model memory
-void freeOBJ(OBJModel* model) {
-    if (model) {
-        free(model->vertices);
-        free(model->texCoords);
-        free(model->normals);
-        free(model->faces);
-        free(model);
-    }
 }
 
 // ENTITY STRUCTURE //
@@ -987,6 +949,9 @@ const char* fragment_shader = "#version 330 core\n"
     "uniform sampler2D u_texture;\n"
     "void main() {\n"
     "   FragColor = texture(u_texture, TexCoord) * vertexColor;\n"
+    "   if (FragColor.a < 0.1) {\n"
+    "       discard;\n"
+    "   }\n"
     "}\0";
 
 Shader create_shader() {
@@ -1306,12 +1271,12 @@ int main() {
     // ============================================================================
     
     const char* skybox_faces[6] = {
-        "ocean_skybox right.bmp",   // GL_TEXTURE_CUBE_MAP_POSITIVE_X
-        "ocean_skybox left.bmp",    // GL_TEXTURE_CUBE_MAP_NEGATIVE_X
-        "ocean_skybox top.bmp",     // GL_TEXTURE_CUBE_MAP_POSITIVE_Y
-        "ocean_skybox bottom.bmp",  // GL_TEXTURE_CUBE_MAP_NEGATIVE_Y
-        "ocean_skybox front.bmp",   // GL_TEXTURE_CUBE_MAP_POSITIVE_Z
-        "ocean_skybox back.bmp"     // GL_TEXTURE_CUBE_MAP_NEGATIVE_Z
+        "cloud_skybox right.png",   // GL_TEXTURE_CUBE_MAP_POSITIVE_X
+        "cloud_skybox left.png",    // GL_TEXTURE_CUBE_MAP_NEGATIVE_X
+        "cloud_skybox top.png",     // GL_TEXTURE_CUBE_MAP_POSITIVE_Y
+        "cloud_skybox bottom.png",  // GL_TEXTURE_CUBE_MAP_NEGATIVE_Y
+        "cloud_skybox front.png",   // GL_TEXTURE_CUBE_MAP_POSITIVE_Z
+        "cloud_skybox back.png"     // GL_TEXTURE_CUBE_MAP_NEGATIVE_Z
     };
     Skybox skybox;
     skybox.init(skybox_faces);
@@ -1327,6 +1292,7 @@ int main() {
 
     // Create entities for each mesh part
     for (Mesh* mesh : tree_meshes) {
+        printf("skibidi\n");
         all_entities.push_back(create_entity(mesh, (Vec3){0, 0, 0}));
     }
     
