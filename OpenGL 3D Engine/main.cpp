@@ -12,7 +12,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
-#include <cmath>
 #include <iostream>
 #include <vector>
 #include "stb_image.h"
@@ -31,6 +30,8 @@ bool paused = false;
 
 // Engine variables
 unsigned int total_triangles = 0;
+unsigned int entity_count = 0;
+unsigned int registered_meshes = 0;
 
 // Global mesh registry for cleanup
 std::vector<class Mesh*> global_mesh_registry;
@@ -296,7 +297,7 @@ public:
     // Constructor
     Mesh() : vertices(nullptr), indices(nullptr), vertex_count(0), index_count(0),
              TRIANGLE_COUNT(0), VAO(0), VBO(0), EBO(0), texture_id(0), cull_mode(CULL_BACK) {
-        global_mesh_registry.push_back(this);
+                 global_mesh_registry.push_back(this);
     }
     
     // Destructor
@@ -433,6 +434,32 @@ static const float SKYBOX_VERTICES[] = {
 };
 
 // ============================================================================
+// ENTITY STRUCTURES
+// ============================================================================
+
+typedef struct {
+    Vec3 position;
+    Vec3 rotation;
+    Vec3 scale;
+    Mesh* mesh;
+    int active;
+} Entity;
+
+// Create entity
+Entity create_entity(Mesh* mesh, Vec3 pos) {
+    Entity entity;
+    entity.position = pos;
+    entity.rotation = (Vec3){0, 0, 0};
+    entity.scale = (Vec3){1, 1, 1};
+    entity.mesh = mesh;
+    entity.active = 1;
+    return entity;
+}
+
+// Global dynamic array
+std::vector<Entity> all_entities;
+
+// ============================================================================
 // OBJ AND MTL FILE IMPORTERS
 // ============================================================================
 
@@ -454,11 +481,11 @@ typedef struct {
     Material* materials;
     int* face_materials;
     
-    int vertexCount;
-    int texCoordCount;
-    int normalCount;
-    int faceCount;
-    int materialCount;
+    size_t vertexCount;
+    size_t texCoordCount;
+    size_t normalCount;
+    size_t faceCount;
+    size_t materialCount;
 } OBJModel;
 
 OBJModel* loadOBJ(const char* filename, const char* mtl_path = nullptr) {
@@ -500,8 +527,7 @@ OBJModel* loadOBJ(const char* filename, const char* mtl_path = nullptr) {
         }
     }
     
-    // Include default + found materials
-    model->materialCount = 1 + materials.size();
+    model->materialCount = materials.size();
     
     // Allocate memory
     model->vertices = (Vec3*)malloc(model->vertexCount * sizeof(Vec3));
@@ -511,15 +537,11 @@ OBJModel* loadOBJ(const char* filename, const char* mtl_path = nullptr) {
     model->materials = (Material*)malloc(model->materialCount * sizeof(Material));
     model->face_materials = (int*)malloc((model->faceCount / 3) * sizeof(int));
     
-    // Initialize materials array with default first, then unique materials
-    strcpy(model->materials[0].name, "default");
-    model->materials[0].texture_id = 0;
-    model->materials[0].diffuse_color = (Color){1.0f, 1.0f, 1.0f, 1.0f};
-    
+    // Initialize materials array
     for (int i = 0; i < materials.size(); i++) {
-        strcpy(model->materials[i + 1].name, materials[i].c_str());
-        model->materials[i + 1].texture_id = 0;
-        model->materials[i + 1].diffuse_color = (Color){1.0f, 1.0f, 1.0f, 1.0f};
+        strcpy(model->materials[i].name, materials[i].c_str());
+        model->materials[i].texture_id = 0;
+        model->materials[i].diffuse_color = (Color){1.0f, 1.0f, 1.0f, 1.0f};
     }
     
     // Second pass: read data
@@ -564,7 +586,7 @@ OBJModel* loadOBJ(const char* filename, const char* mtl_path = nullptr) {
             }
             
             if (!found) {
-                printf("WARNING: Material %s not found, using default\n", mtl_name);
+                printf("WARNING: Material %s not found, using first\n", mtl_name);
                 current_material = 0;
             }
         }
@@ -598,7 +620,7 @@ OBJModel* loadOBJ(const char* filename, const char* mtl_path = nullptr) {
                 face_count++;
             }
             else {
-                printf("WARNING: Unsupported face format in line: %s", line);
+                printf("WARNING: Unsupported face format in line, only quads and triangles supported: %s", line);
             }
         }
     }
@@ -606,22 +628,11 @@ OBJModel* loadOBJ(const char* filename, const char* mtl_path = nullptr) {
     model->faceCount = fIndex;
     fclose(file);
     
-    // Debug: Count faces per material
-    std::vector<int> face_counts(model->materialCount, 0);
-    for (int i = 0; i < face_count; i++) {
-        if (model->face_materials[i] >= 0 && model->face_materials[i] < model->materialCount) {
-            face_counts[model->face_materials[i]]++;
-        }
-    }
-    
-    for (int i = 0; i < model->materialCount; i++) {
-        printf("Material %d (%s): %d faces\n", i, model->materials[i].name, face_counts[i]);
-    }
-    
     return model;
 }
+
 // Function to parse MTL file
-void loadMTL(const char* mtl_path, Material* materials, int* material_count, int max_materials) {
+void loadMTL(const char* mtl_path, Material* materials, size_t* material_count, size_t max_materials) {
     FILE* file = fopen(mtl_path, "r");
     if (!file) {
         printf("Warning: Cannot open MTL file %s\n", mtl_path);
@@ -638,10 +649,6 @@ void loadMTL(const char* mtl_path, Material* materials, int* material_count, int
                 char mtl_name[256];
                 sscanf(line, "newmtl %s", mtl_name);
                 strcpy(materials[current_material].name, mtl_name);
-                
-                // Initialize with defaults
-                materials[current_material].texture_id = 0;
-                materials[current_material].diffuse_color = (Color){1.0f, 1.0f, 1.0f, 1.0f};
             }
         }
         // Diffuse color
@@ -708,7 +715,7 @@ OBJModel* loadOBJWithMTL(const char* obj_path) {
     return model;
 }
 
-std::vector<Mesh*> create_mesh_with_obj(const char* obj_path, Vec3 center, float size) {
+std::vector<Mesh*> create_mesh_with_obj(const char* mesh_name, const char* obj_path, Vec3 center, float size) {
     OBJModel* model = loadOBJWithMTL(obj_path);
     if (!model) {
         printf("Failed to load OBJ file with materials: %s\n", obj_path);
@@ -743,7 +750,7 @@ std::vector<Mesh*> create_mesh_with_obj(const char* obj_path, Vec3 center, float
                     
                     // Bounds checking
                     if (face->v >= model->vertexCount || face->vt >= model->texCoordCount || face->vn >= model->normalCount) {
-                        printf("WARNING: Face %d vertex %d has invalid indices: v=%d vt=%d vn=%d (max: v=%d vt=%d vn=%d)\n",
+                        printf("WARNING: Face %d vertex %d has invalid indices: v=%d vt=%d vn=%d (max: v=%zu vt=%zu vn=%zu)\n",
                                face_idx, v, face->v, face->vt, face->vn,
                                model->vertexCount-1, model->texCoordCount-1, model->normalCount-1);
                         continue;
@@ -774,9 +781,6 @@ std::vector<Mesh*> create_mesh_with_obj(const char* obj_path, Vec3 center, float
             }
         }
         
-        printf("Material %d: Expected %d triangles, actually processed %d triangles\n",
-               mat_idx, total_triangles_for_material, triangle_count);
-        
         // Only create mesh if it has vertices
         if (triangle_count > 0) {
             Mesh* mesh = new Mesh();
@@ -784,7 +788,7 @@ std::vector<Mesh*> create_mesh_with_obj(const char* obj_path, Vec3 center, float
             mesh->index_count = triangle_count * 3;
             mesh->TRIANGLE_COUNT = triangle_count;
             mesh->texture_id = model->materials[mat_idx].texture_id;
-            mesh->cull_mode = CULL_BACK;
+            mesh->cull_mode = CULL_NONE;
             
             // Allocate and copy vertex data
             mesh->vertices = (float*)malloc(mesh->vertex_count * sizeof(float));
@@ -832,28 +836,16 @@ std::vector<Mesh*> create_mesh_with_obj(const char* obj_path, Vec3 center, float
     free(model->face_materials);
     free(model);
     
+    registered_meshes++;
+    
+    // Create entities for each mesh part
+    for (Mesh* mesh : meshes) {
+        all_entities.push_back(create_entity(mesh, (Vec3) center));
+    }
+    
+    entity_count++;
+    
     return meshes;
-}
-
-// ENTITY STRUCTURE //
-
-typedef struct {
-    Vec3 position;
-    Vec3 rotation;
-    Vec3 scale;
-    Mesh* mesh;
-    int active;
-} Entity;
-
-// Create entity
-Entity create_entity(Mesh* mesh, Vec3 pos) {
-    Entity entity;
-    entity.position = pos;
-    entity.rotation = (Vec3){0, 0, 0};
-    entity.scale = (Vec3){1, 1, 1};
-    entity.mesh = mesh;
-    entity.active = 1;
-    return entity;
 }
 
 // ============================================================================
@@ -1287,18 +1279,11 @@ int main() {
     
     // Load and create all scene entities
     
-    std::vector<Entity> all_entities;
-    std::vector<Mesh*> tree_meshes = create_mesh_with_obj("Tree.obj", (Vec3){0, 0, 0}, 2.0f);
-
-    // Create entities for each mesh part
-    for (Mesh* mesh : tree_meshes) {
-        printf("skibidi\n");
-        all_entities.push_back(create_entity(mesh, (Vec3){0, 0, 0}));
-    }
+    create_mesh_with_obj("tree_mesh", "Tree.obj", (Vec3){0, 0, 0}, 2.0f);
     
     printf("Total triangles: %d\n", total_triangles);
-    printf("Registered meshes: %zu\n", global_mesh_registry.size());
-    printf("Game objects: %zu\n", all_entities.size());
+    printf("Registered meshes: %d\n", registered_meshes);
+    printf("Game objects: %d\n", entity_count);
     printf("Controls: WASD to move, mouse to look around, E/Q to move up/down, ESC to exit\n");
     
     // ENGINE MAIN LOOP //
