@@ -14,6 +14,8 @@
 #include <math.h>
 #include <iostream>
 #include <vector>
+#include <memory>
+#include <unordered_set>
 #include "stb_image.h"
 
 // --- Function Prototypes ---
@@ -31,10 +33,9 @@ bool paused = false;
 // Engine variables
 unsigned int total_triangles = 0;
 unsigned int entity_count = 0;
-unsigned int registered_meshes = 0;
 
 // Global mesh registry for cleanup
-std::vector<class Mesh*> global_mesh_registry;
+std::unordered_set<class Mesh*> global_mesh_registry;
 
 // FPS counter
 double lastTime = 0.0;
@@ -293,21 +294,20 @@ public:
     GLuint VAO, VBO, EBO;
     GLuint texture_id;
     CullMode cull_mode;
+    bool is_cleaned_up;
     
     // Constructor
     Mesh() : vertices(nullptr), indices(nullptr), vertex_count(0), index_count(0),
-             TRIANGLE_COUNT(0), VAO(0), VBO(0), EBO(0), texture_id(0), cull_mode(CULL_BACK) {
-                 global_mesh_registry.push_back(this);
+             TRIANGLE_COUNT(0), VAO(0), VBO(0), EBO(0), texture_id(0),
+             cull_mode(CULL_BACK), is_cleaned_up(false) {
+        // Use unordered_set instead of vector to avoid reallocation issues
+        global_mesh_registry.insert(this);
     }
     
     // Destructor
     ~Mesh() {
         cleanup();
-        // Remove from registry
-        auto it = std::find(global_mesh_registry.begin(), global_mesh_registry.end(), this);
-        if (it != global_mesh_registry.end()) {
-            global_mesh_registry.erase(it);
-        }
+        global_mesh_registry.erase(this);
     }
     
     // Get VAO for debugging
@@ -315,11 +315,14 @@ public:
     
     // Check if mesh is valid
     bool isValid() const {
-        return VAO != 0 && TRIANGLE_COUNT > 0;
+        return VAO != 0 && TRIANGLE_COUNT > 0 && !is_cleaned_up;
     }
     
-    // Cleanup method
+    // Cleanup method - can be called safely multiple times
     void cleanup() {
+        if (is_cleaned_up) return;
+        
+        // Free CPU memory
         if (vertices) {
             free(vertices);
             vertices = nullptr;
@@ -329,25 +332,31 @@ public:
             indices = nullptr;
         }
         
-        if (VAO != 0) glDeleteVertexArrays(1, &VAO);
-        if (VBO != 0) glDeleteBuffers(1, &VBO);
-        if (EBO != 0) glDeleteBuffers(1, &EBO);
+        // Delete OpenGL objects
+        if (VAO != 0) {
+            glDeleteVertexArrays(1, &VAO);
+            VAO = 0;
+        }
+        if (VBO != 0) {
+            glDeleteBuffers(1, &VBO);
+            VBO = 0;
+        }
+        if (EBO != 0) {
+            glDeleteBuffers(1, &EBO);
+            EBO = 0;
+        }
         
-        VAO = VBO = EBO = 0;
         vertex_count = index_count = TRIANGLE_COUNT = 0;
+        is_cleaned_up = true;
     }
 };
 
-// Global cleanup function
 void cleanup_all_meshes() {
-    // Clean up all registered meshes
     for (auto* mesh : global_mesh_registry) {
-        if (mesh) {
+        if (mesh && !mesh->is_cleaned_up) {
             mesh->cleanup();
         }
     }
-    
-    // Clear the registry
     global_mesh_registry.clear();
 }
 
@@ -438,6 +447,7 @@ static const float SKYBOX_VERTICES[] = {
 // ============================================================================
 
 typedef struct {
+    const char* name;
     Vec3 position;
     Vec3 rotation;
     Vec3 scale;
@@ -446,8 +456,9 @@ typedef struct {
 } Entity;
 
 // Create entity
-Entity create_entity(Mesh* mesh, Vec3 pos) {
+Entity create_entity(const char* name, Mesh* mesh, Vec3 pos) {
     Entity entity;
+    entity.name = name;
     entity.position = pos;
     entity.rotation = (Vec3){0, 0, 0};
     entity.scale = (Vec3){1, 1, 1};
@@ -458,6 +469,26 @@ Entity create_entity(Mesh* mesh, Vec3 pos) {
 
 // Global dynamic array
 std::vector<Entity> all_entities;
+
+void update_entity(const char* name, Vec3 pos, Vec3 rot, Vec3 scale) {
+    // Search for entity with given name
+    for (unsigned int i = 0; i < all_entities.size(); i++) {
+        if (all_entities[i].name == name) {
+            // Now update entity attributes
+            all_entities[i].position.x = pos.x;
+            all_entities[i].position.y = pos.y;
+            all_entities[i].position.z = pos.z;
+            
+            all_entities[i].rotation.x = rot.x;
+            all_entities[i].rotation.y = rot.y;
+            all_entities[i].rotation.z = rot.z;
+            
+            all_entities[i].scale.x = scale.x;
+            all_entities[i].scale.y = scale.y;
+            all_entities[i].scale.z = scale.z;
+        }
+    }
+}
 
 // ============================================================================
 // OBJ AND MTL FILE IMPORTERS
@@ -495,76 +526,148 @@ OBJModel* loadOBJ(const char* filename, const char* mtl_path = nullptr) {
         return nullptr;
     }
     
-    OBJModel* model = (OBJModel*)malloc(sizeof(OBJModel));
-    memset(model, 0, sizeof(OBJModel));
+    // Use safer allocation approach
+    OBJModel* model = (OBJModel*)calloc(1, sizeof(OBJModel));
+    if (!model) {
+        fclose(file);
+        return nullptr;
+    }
     
-    // First pass: count elements and unique materials
-    char line[256];
+    // Declare ALL variables at the top to avoid goto issues
+    char line[1024];
     std::vector<std::string> materials;
+    size_t vIndex = 0, vtIndex = 0, vnIndex = 0, fIndex = 0;
+    int current_material = 0;
+    size_t face_count = 0;
+    bool allocation_failed = false;
     
+    // First pass: count elements
     while (fgets(line, sizeof(line), file)) {
-        if (strncmp(line, "v ", 2) == 0) model->vertexCount++;
-        else if (strncmp(line, "vt ", 3) == 0) model->texCoordCount++;
-        else if (strncmp(line, "vn ", 3) == 0) model->normalCount++;
-        else if (strncmp(line, "f ", 2) == 0) model->faceCount += 2; // Assuming triangulation
-        else if (strncmp(line, "usemtl ", 7) == 0) {
-            char mtl_name[256];
-            sscanf(line, "usemtl %s", mtl_name);
-            
-            // Check to see if material already exists in list
-            bool found = false;
-            for (const auto& existing : materials) {
-                if (existing == mtl_name) {
-                    found = true;
-                    break;
+        if (strncmp(line, "v ", 2) == 0) {
+            model->vertexCount++;
+        }
+        else if (strncmp(line, "vt ", 3) == 0) {
+            model->texCoordCount++;
+        }
+        else if (strncmp(line, "vn ", 3) == 0) {
+            model->normalCount++;
+        }
+        else if (strncmp(line, "f ", 2) == 0) {
+            // Count vertices in face (handle both triangles and quads)
+            int vertex_count = 0;
+            char* line_copy = strdup(line); // Make a copy for strtok
+            if (line_copy) {
+                char* token = strtok(line_copy + 2, " \t\n");
+                while (token) {
+                    vertex_count++;
+                    token = strtok(NULL, " \t\n");
+                }
+                free(line_copy);
+                
+                if (vertex_count == 4) {
+                    model->faceCount += 2; // Quad -> 2 triangles
+                } else if (vertex_count == 3) {
+                    model->faceCount += 1; // Triangle
                 }
             }
-            
-            // Add if it is a new unique material
-            if (!found) {
-                materials.push_back(mtl_name);
+        }
+        else if (strncmp(line, "usemtl ", 7) == 0) {
+            char mtl_name[256];
+            if (sscanf(line, "usemtl %255s", mtl_name) == 1) {
+                bool found = false;
+                for (const auto& existing : materials) {
+                    if (existing == mtl_name) {
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found) {
+                    materials.push_back(mtl_name);
+                }
             }
         }
     }
     
-    model->materialCount = materials.size();
+    model->materialCount = std::max((size_t)1, materials.size());
     
-    // Allocate memory
-    model->vertices = (Vec3*)malloc(model->vertexCount * sizeof(Vec3));
-    model->texCoords = (Vec2*)malloc(model->texCoordCount * sizeof(Vec2));
-    model->normals = (Vec3*)malloc(model->normalCount * sizeof(Vec3));
-    model->faces = (FaceVertex*)malloc(model->faceCount * 3 * sizeof(FaceVertex));
-    model->materials = (Material*)malloc(model->materialCount * sizeof(Material));
-    model->face_materials = (int*)malloc((model->faceCount / 3) * sizeof(int));
+    // Allocate arrays with safety checks - use if/else chain instead of goto
+    if (model->vertexCount > 0) {
+        model->vertices = (Vec3*)calloc(model->vertexCount, sizeof(Vec3));
+        if (!model->vertices) allocation_failed = true;
+    }
     
-    // Initialize materials array
-    for (int i = 0; i < materials.size(); i++) {
-        strcpy(model->materials[i].name, materials[i].c_str());
+    if (!allocation_failed && model->texCoordCount > 0) {
+        model->texCoords = (Vec2*)calloc(model->texCoordCount, sizeof(Vec2));
+        if (!model->texCoords) allocation_failed = true;
+    }
+    
+    if (!allocation_failed && model->normalCount > 0) {
+        model->normals = (Vec3*)calloc(model->normalCount, sizeof(Vec3));
+        if (!model->normals) allocation_failed = true;
+    }
+    
+    if (!allocation_failed && model->faceCount > 0) {
+        model->faces = (FaceVertex*)calloc(model->faceCount * 3, sizeof(FaceVertex));
+        if (!model->faces) allocation_failed = true;
+        
+        if (!allocation_failed) {
+            model->face_materials = (int*)calloc(model->faceCount, sizeof(int));
+            if (!model->face_materials) allocation_failed = true;
+        }
+    }
+    
+    if (!allocation_failed) {
+        model->materials = (Material*)calloc(model->materialCount, sizeof(Material));
+        if (!model->materials) allocation_failed = true;
+    }
+    
+    // If any allocation failed, clean up and return null
+    if (allocation_failed) {
+        printf("Error: Failed to allocate memory for OBJ model\n");
+        if (model->vertices) free(model->vertices);
+        if (model->texCoords) free(model->texCoords);
+        if (model->normals) free(model->normals);
+        if (model->faces) free(model->faces);
+        if (model->materials) free(model->materials);
+        if (model->face_materials) free(model->face_materials);
+        free(model);
+        fclose(file);
+        return nullptr;
+    }
+    
+    // Initialize materials
+    for (size_t i = 0; i < materials.size(); i++) {
+        strncpy(model->materials[i].name, materials[i].c_str(), 255);
+        model->materials[i].name[255] = '\0';
         model->materials[i].texture_id = 0;
         model->materials[i].diffuse_color = (Color){1.0f, 1.0f, 1.0f, 1.0f};
     }
     
-    // Second pass: read data
+    // If no materials found, create default
+    if (materials.empty()) {
+        strcpy(model->materials[0].name, "Default");
+        model->materials[0].texture_id = 0;
+        model->materials[0].diffuse_color = (Color){1.0f, 1.0f, 1.0f, 1.0f};
+    }
+    
+    // Second pass: read data with bounds checking
     rewind(file);
-    int vIndex = 0, vtIndex = 0, vnIndex = 0, fIndex = 0;
-    int current_material = 0;
-    int face_count = 0;
     
     while (fgets(line, sizeof(line), file)) {
-        if (strncmp(line, "v ", 2) == 0) {
+        if (strncmp(line, "v ", 2) == 0 && vIndex < model->vertexCount) {
             sscanf(line, "v %f %f %f",
                    &model->vertices[vIndex].x,
                    &model->vertices[vIndex].y,
                    &model->vertices[vIndex].z);
             vIndex++;
         }
-        else if (strncmp(line, "vt ", 3) == 0) {
+        else if (strncmp(line, "vt ", 3) == 0 && vtIndex < model->texCoordCount) {
             sscanf(line, "vt %f %f",
                    &model->texCoords[vtIndex].u,
                    &model->texCoords[vtIndex].v);
             vtIndex++;
         }
-        else if (strncmp(line, "vn ", 3) == 0) {
+        else if (strncmp(line, "vn ", 3) == 0 && vnIndex < model->normalCount) {
             sscanf(line, "vn %f %f %f",
                    &model->normals[vnIndex].x,
                    &model->normals[vnIndex].y,
@@ -573,61 +676,74 @@ OBJModel* loadOBJ(const char* filename, const char* mtl_path = nullptr) {
         }
         else if (strncmp(line, "usemtl ", 7) == 0) {
             char mtl_name[256];
-            sscanf(line, "usemtl %s", mtl_name);
-            
-            // Find the material in pre-allocated array
-            bool found = false;
-            for (int i = 0; i < model->materialCount; i++) {
-                if (strcmp(model->materials[i].name, mtl_name) == 0) {
-                    current_material = i;
-                    found = true;
-                    break;
+            if (sscanf(line, "usemtl %255s", mtl_name) == 1) {
+                bool found = false;
+                for (int i = 0; i < (int)model->materialCount; i++) {
+                    if (strcmp(model->materials[i].name, mtl_name) == 0) {
+                        current_material = i;
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found) {
+                    current_material = 0;
                 }
             }
-            
-            if (!found) {
-                printf("WARNING: Material %s not found, using first\n", mtl_name);
-                current_material = 0;
-            }
         }
-        else if (strncmp(line, "f ", 2) == 0) {
-            // Parse face and assign current material
+        else if (strncmp(line, "f ", 2) == 0 && face_count < model->faceCount) {
             unsigned int v1, vt1, vn1, v2, vt2, vn2, v3, vt3, vn3, v4, vt4, vn4;
+            
+            // Try to parse as quad first
             int matches = sscanf(line, "f %u/%u/%u %u/%u/%u %u/%u/%u %u/%u/%u",
                                 &v1, &vt1, &vn1, &v2, &vt2, &vn2,
                                 &v3, &vt3, &vn3, &v4, &vt4, &vn4);
             
-            if (matches == 12) { // Quad - split into two triangles
-                // First triangle
-                model->faces[fIndex].v = v1 - 1; model->faces[fIndex].vt = vt1 - 1; model->faces[fIndex].vn = vn1 - 1; fIndex++;
-                model->faces[fIndex].v = v2 - 1; model->faces[fIndex].vt = vt2 - 1; model->faces[fIndex].vn = vn2 - 1; fIndex++;
-                model->faces[fIndex].v = v3 - 1; model->faces[fIndex].vt = vt3 - 1; model->faces[fIndex].vn = vn3 - 1; fIndex++;
-                model->face_materials[face_count] = current_material;
-                face_count++;
+            if (matches == 12 && face_count + 1 < model->faceCount) {
+                // Validate all indices before processing
+                bool quad_valid = (v1 > 0 && v1 <= model->vertexCount && vt1 > 0 && vt1 <= model->texCoordCount && vn1 > 0 && vn1 <= model->normalCount &&
+                                  v2 > 0 && v2 <= model->vertexCount && vt2 > 0 && vt2 <= model->texCoordCount && vn2 > 0 && vn2 <= model->normalCount &&
+                                  v3 > 0 && v3 <= model->vertexCount && vt3 > 0 && vt3 <= model->texCoordCount && vn3 > 0 && vn3 <= model->normalCount &&
+                                  v4 > 0 && v4 <= model->vertexCount && vt4 > 0 && vt4 <= model->texCoordCount && vn4 > 0 && vn4 <= model->normalCount);
                 
-                // Second triangle
-                model->faces[fIndex].v = v1 - 1; model->faces[fIndex].vt = vt1 - 1; model->faces[fIndex].vn = vn1 - 1; fIndex++;
-                model->faces[fIndex].v = v3 - 1; model->faces[fIndex].vt = vt3 - 1; model->faces[fIndex].vn = vn3 - 1; fIndex++;
-                model->faces[fIndex].v = v4 - 1; model->faces[fIndex].vt = vt4 - 1; model->faces[fIndex].vn = vn4 - 1; fIndex++;
-                model->face_materials[face_count] = current_material;
-                face_count++;
-            }
-            else if (matches == 9) { // Triangle
-                model->faces[fIndex].v = v1 - 1; model->faces[fIndex].vt = vt1 - 1; model->faces[fIndex].vn = vn1 - 1; fIndex++;
-                model->faces[fIndex].v = v2 - 1; model->faces[fIndex].vt = vt2 - 1; model->faces[fIndex].vn = vn2 - 1; fIndex++;
-                model->faces[fIndex].v = v3 - 1; model->faces[fIndex].vt = vt3 - 1; model->faces[fIndex].vn = vn3 - 1; fIndex++;
-                model->face_materials[face_count] = current_material;
-                face_count++;
+                if (quad_valid) {
+                    // First triangle: v1, v2, v3
+                    model->faces[fIndex].v = v1 - 1; model->faces[fIndex].vt = vt1 - 1; model->faces[fIndex].vn = vn1 - 1; fIndex++;
+                    model->faces[fIndex].v = v2 - 1; model->faces[fIndex].vt = vt2 - 1; model->faces[fIndex].vn = vn2 - 1; fIndex++;
+                    model->faces[fIndex].v = v3 - 1; model->faces[fIndex].vt = vt3 - 1; model->faces[fIndex].vn = vn3 - 1; fIndex++;
+                    model->face_materials[face_count] = current_material;
+                    face_count++;
+                    
+                    // Second triangle: v1, v3, v4
+                    model->faces[fIndex].v = v1 - 1; model->faces[fIndex].vt = vt1 - 1; model->faces[fIndex].vn = vn1 - 1; fIndex++;
+                    model->faces[fIndex].v = v3 - 1; model->faces[fIndex].vt = vt3 - 1; model->faces[fIndex].vn = vn3 - 1; fIndex++;
+                    model->faces[fIndex].v = v4 - 1; model->faces[fIndex].vt = vt4 - 1; model->faces[fIndex].vn = vn4 - 1; fIndex++;
+                    model->face_materials[face_count] = current_material;
+                    face_count++;
+                }
             }
             else {
-                printf("WARNING: Unsupported face format in line, only quads and triangles supported: %s", line);
+                // Try triangle
+                matches = sscanf(line, "f %u/%u/%u %u/%u/%u %u/%u/%u",
+                                &v1, &vt1, &vn1, &v2, &vt2, &vn2, &v3, &vt3, &vn3);
+                
+                if (matches == 9) {
+                    bool triangle_valid = (v1 > 0 && v1 <= model->vertexCount && vt1 > 0 && vt1 <= model->texCoordCount && vn1 > 0 && vn1 <= model->normalCount &&
+                                          v2 > 0 && v2 <= model->vertexCount && vt2 > 0 && vt2 <= model->texCoordCount && vn2 > 0 && vn2 <= model->normalCount &&
+                                          v3 > 0 && v3 <= model->vertexCount && vt3 > 0 && vt3 <= model->texCoordCount && vn3 > 0 && vn3 <= model->normalCount);
+                    
+                    if (triangle_valid) {
+                        model->faces[fIndex].v = v1 - 1; model->faces[fIndex].vt = vt1 - 1; model->faces[fIndex].vn = vn1 - 1; fIndex++;
+                        model->faces[fIndex].v = v2 - 1; model->faces[fIndex].vt = vt2 - 1; model->faces[fIndex].vn = vn2 - 1; fIndex++;
+                        model->faces[fIndex].v = v3 - 1; model->faces[fIndex].vt = vt3 - 1; model->faces[fIndex].vn = vn3 - 1; fIndex++;
+                        model->face_materials[face_count] = current_material;
+                        face_count++;
+                    }
+                }
             }
         }
     }
     
-    model->faceCount = fIndex;
     fclose(file);
-    
     return model;
 }
 
@@ -715,73 +831,77 @@ OBJModel* loadOBJWithMTL(const char* obj_path) {
     return model;
 }
 
-std::vector<Mesh*> create_mesh_with_obj(const char* mesh_name, const char* obj_path, Vec3 center, float size) {
+std::vector<Mesh*> create_mesh_with_obj(const char* name, const char* obj_path, Vec3 center, float size) {
     OBJModel* model = loadOBJWithMTL(obj_path);
     if (!model) {
         printf("Failed to load OBJ file with materials: %s\n", obj_path);
         return {};
     }
-        
+    
     std::vector<Mesh*> meshes;
     
     // Create separate mesh for each material
-    for (int mat_idx = 0; mat_idx < model->materialCount; mat_idx++) {
+    for (size_t mat_idx = 0; mat_idx < model->materialCount; mat_idx++) {
         std::vector<float> vertices;
         int triangle_count = 0;
-        int total_triangles_for_material = 0;
-        
-        // First pass: count triangles for this material
-        for (int face_idx = 0; face_idx < model->faceCount / 3; face_idx++) {
-            if (model->face_materials[face_idx] == mat_idx) {
-                total_triangles_for_material++;
-            }
-        }
-        
-        printf("Material %d (%s): Processing %d triangles\n",
-               mat_idx, model->materials[mat_idx].name, total_triangles_for_material);
         
         // Collect all faces that use this material
-        for (int face_idx = 0; face_idx < model->faceCount / 3; face_idx++) {
-            if (model->face_materials[face_idx] == mat_idx) {
-                // Add the 3 vertices of this triangle
-                for (int v = 0; v < 3; v++) {
-                    int vertex_idx = face_idx * 3 + v;
-                    FaceVertex* face = &model->faces[vertex_idx];
-                    
-                    // Bounds checking
-                    if (face->v >= model->vertexCount || face->vt >= model->texCoordCount || face->vn >= model->normalCount) {
-                        printf("WARNING: Face %d vertex %d has invalid indices: v=%d vt=%d vn=%d (max: v=%zu vt=%zu vn=%zu)\n",
-                               face_idx, v, face->v, face->vt, face->vn,
-                               model->vertexCount-1, model->texCoordCount-1, model->normalCount-1);
-                        continue;
-                    }
-                    
-                    // Position (transformed)
-                    Vec3 pos = model->vertices[face->v];
-                    vertices.push_back(pos.x * size + center.x);
-                    vertices.push_back(pos.y * size + center.y);
-                    vertices.push_back(pos.z * size + center.z);
-                    
-                    // Color (from material)
-                    vertices.push_back(model->materials[mat_idx].diffuse_color.r);
-                    vertices.push_back(model->materials[mat_idx].diffuse_color.g);
-                    vertices.push_back(model->materials[mat_idx].diffuse_color.b);
-                    vertices.push_back(model->materials[mat_idx].diffuse_color.a);
-                    
-                    // Texture coordinates
-                    vertices.push_back(model->texCoords[face->vt].u);
-                    vertices.push_back(model->texCoords[face->vt].v);
-                    
-                    // Normals
-                    vertices.push_back(model->normals[face->vn].x);
-                    vertices.push_back(model->normals[face->vn].y);
-                    vertices.push_back(model->normals[face->vn].z);
-                }
-                triangle_count++;
+        for (size_t face_idx = 0; face_idx < model->faceCount; face_idx++) {
+            if (model->face_materials[face_idx] != (int)mat_idx) {
+                continue;
             }
+            
+            // Validate triangle indices
+            bool triangle_valid = true;
+            for (int v = 0; v < 3; v++) {
+                size_t vertex_idx = face_idx * 3 + v;
+                if (vertex_idx >= model->faceCount * 3) {
+                    triangle_valid = false;
+                    break;
+                }
+                
+                FaceVertex* face = &model->faces[vertex_idx];
+                
+                if (face->v >= model->vertexCount ||
+                    face->vt >= model->texCoordCount ||
+                    face->vn >= model->normalCount) {
+                    triangle_valid = false;
+                    break;
+                }
+            }
+            
+            if (!triangle_valid) continue;
+            
+            // Process all 3 vertices of the valid triangle
+            for (int v = 0; v < 3; v++) {
+                size_t vertex_idx = face_idx * 3 + v;
+                FaceVertex* face = &model->faces[vertex_idx];
+                
+                // Position
+                Vec3 pos = model->vertices[face->v];
+                vertices.push_back(pos.x * size + center.x);
+                vertices.push_back(pos.y * size + center.y);
+                vertices.push_back(pos.z * size + center.z);
+                
+                // Color
+                vertices.push_back(model->materials[mat_idx].diffuse_color.r);
+                vertices.push_back(model->materials[mat_idx].diffuse_color.g);
+                vertices.push_back(model->materials[mat_idx].diffuse_color.b);
+                vertices.push_back(model->materials[mat_idx].diffuse_color.a);
+                
+                // Texture coordinates
+                vertices.push_back(model->texCoords[face->vt].u);
+                vertices.push_back(model->texCoords[face->vt].v);
+                
+                // Normals
+                vertices.push_back(model->normals[face->vn].x);
+                vertices.push_back(model->normals[face->vn].y);
+                vertices.push_back(model->normals[face->vn].z);
+            }
+            triangle_count++;
         }
         
-        // Only create mesh if it has vertices
+        // Create mesh if it has triangles
         if (triangle_count > 0) {
             Mesh* mesh = new Mesh();
             mesh->vertex_count = vertices.size();
@@ -790,25 +910,30 @@ std::vector<Mesh*> create_mesh_with_obj(const char* mesh_name, const char* obj_p
             mesh->texture_id = model->materials[mat_idx].texture_id;
             mesh->cull_mode = CULL_NONE;
             
-            // Allocate and copy vertex data
+            // Allocate vertex data
             mesh->vertices = (float*)malloc(mesh->vertex_count * sizeof(float));
+            if (!mesh->vertices) {
+                delete mesh;
+                continue;
+            }
             memcpy(mesh->vertices, vertices.data(), mesh->vertex_count * sizeof(float));
             mesh->indices = nullptr;
             
-            // Upload to GPU
+            // Create OpenGL objects
             glGenVertexArrays(1, &mesh->VAO);
             glGenBuffers(1, &mesh->VBO);
-            glBindVertexArray(mesh->VAO);
             
+            if (mesh->VAO == 0 || mesh->VBO == 0) {
+                printf("Failed to create OpenGL objects\n");
+                delete mesh;
+                continue;
+            }
+            
+            glBindVertexArray(mesh->VAO);
             glBindBuffer(GL_ARRAY_BUFFER, mesh->VBO);
             glBufferData(GL_ARRAY_BUFFER, mesh->vertex_count * sizeof(float), mesh->vertices, GL_STATIC_DRAW);
             
-            // Check for OpenGL errors
-            GLenum error = glGetError();
-            if (error != GL_NO_ERROR) {
-                printf("OpenGL error after buffer upload for material %d: %d\n", mat_idx, error);
-            }
-            
+            // Set up vertex attributes
             glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 12 * sizeof(float), (void*)0);
             glEnableVertexAttribArray(0);
             glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, 12 * sizeof(float), (void*)(3 * sizeof(float)));
@@ -819,32 +944,28 @@ std::vector<Mesh*> create_mesh_with_obj(const char* mesh_name, const char* obj_p
             glEnableVertexAttribArray(3);
             
             glBindVertexArray(0);
+            glBindBuffer(GL_ARRAY_BUFFER, 0);
+            
             meshes.push_back(mesh);
             total_triangles += mesh->TRIANGLE_COUNT;
-            
-            printf("Created mesh for material %d (%s): %d triangles, %zu vertices\n",
-                   mat_idx, model->materials[mat_idx].name, mesh->TRIANGLE_COUNT, mesh->vertex_count);
         }
     }
     
-    // Clean up
-    free(model->vertices);
-    free(model->texCoords);
-    free(model->normals);
-    free(model->faces);
-    free(model->materials);
-    free(model->face_materials);
+    // Clean up model
+    if (model->vertices) free(model->vertices);
+    if (model->texCoords) free(model->texCoords);
+    if (model->normals) free(model->normals);
+    if (model->faces) free(model->faces);
+    if (model->materials) free(model->materials);
+    if (model->face_materials) free(model->face_materials);
     free(model);
-    
-    registered_meshes++;
-    
-    // Create entities for each mesh part
+        
+    // Create entities
     for (Mesh* mesh : meshes) {
-        all_entities.push_back(create_entity(mesh, (Vec3) center));
+        all_entities.push_back(create_entity(name, mesh, center));
     }
     
     entity_count++;
-    
     return meshes;
 }
 
@@ -941,7 +1062,7 @@ const char* fragment_shader = "#version 330 core\n"
     "uniform sampler2D u_texture;\n"
     "void main() {\n"
     "   FragColor = texture(u_texture, TexCoord) * vertexColor;\n"
-    "   if (FragColor.a < 0.1) {\n"
+    "   if (FragColor.a < 0.1f) {\n"
     "       discard;\n"
     "   }\n"
     "}\0";
@@ -1231,7 +1352,7 @@ int main() {
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
     glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
     glfwWindowHint(GLFW_SAMPLES, 4);
-
+    
     GLFWwindow* window = glfwCreateWindow(800, 600, "C++ OpenGL 3D Engine", NULL, NULL);
     if (!window) {
         printf("Failed to create GLFW window\n");
@@ -1239,12 +1360,12 @@ int main() {
         return -1;
     }
     glfwMakeContextCurrent(window);
-
+    
     // Set callbacks
     glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
     glfwSetCursorPosCallback(window, mouse_callback);
     glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
-
+    
     // Initialize renderer
     Renderer renderer;
     renderer_init(&renderer, 800.0f / 600.0f);
@@ -1277,12 +1398,10 @@ int main() {
     // LOAD AND CREATE ALL GAME OBJECTS
     // ============================================================================
     
-    // Load and create all scene entities
-    
-    create_mesh_with_obj("tree_mesh", "Tree.obj", (Vec3){0, 0, 0}, 2.0f);
+    // Create all scene entities
+    create_mesh_with_obj("tree_mesh", "tree.obj", (Vec3){0, 0, 0}, 2.0f);
     
     printf("Total triangles: %d\n", total_triangles);
-    printf("Registered meshes: %d\n", registered_meshes);
     printf("Game objects: %d\n", entity_count);
     printf("Controls: WASD to move, mouse to look around, E/Q to move up/down, ESC to exit\n");
     
@@ -1333,9 +1452,9 @@ int main() {
             // UPDATE ENTITIES
             // ============================================================================
             
-            
+            update_entity("tree_mesh", (Vec3){static_cast<float>(frameCount), 0, 0}, (Vec3){0, 0, 0}, (Vec3){1, 1, 1});
         }
-
+        
         glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         
@@ -1353,7 +1472,7 @@ int main() {
         }
         
         glfwSwapBuffers(window);
-
+        
         // Set cursor modes
         if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS) {
             if (glfwGetInputMode(window, GLFW_CURSOR) == GLFW_CURSOR_DISABLED) {
@@ -1372,10 +1491,14 @@ int main() {
     // Clean up all resources before destroying the GLFW context
     cleanup_all_meshes();
     
+    skybox.cleanup();
+    
     // Clean up other OpenGL resources
-    glUseProgram(0); // Detach shader program if still active
-    glDeleteProgram(renderer.shader.program); // Delete the shader program
-
+    glUseProgram(0);
+    if (renderer.shader.program != 0) {
+        glDeleteProgram(renderer.shader.program);
+    }
+    
     glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
     glfwDestroyWindow(window);
     glfwTerminate();
