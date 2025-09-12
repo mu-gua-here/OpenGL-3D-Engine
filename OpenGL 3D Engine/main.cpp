@@ -1,6 +1,6 @@
 //
-//  main.mm
-//  OpenGL Test
+//  main.cpp
+//  OpenGL 3D Engine
 //
 //  Created by Ray Hsiao Muguang on 2025/6/20.
 //
@@ -33,35 +33,50 @@ bool paused = false;
 // Engine variables
 unsigned int total_triangles = 0;
 unsigned int entity_count = 0;
+float frame_count = 0;
+float delta_time = 1.0f;
 
 // Global mesh registry for cleanup
 std::unordered_set<class Mesh*> global_mesh_registry;
 
 // FPS counter
 double lastTime = 0.0;
-unsigned int frameCount = 0;
+unsigned int fpsFrameCount = 0;
 double lastFrameTime = 0.0;
 
 void updateFPS(GLFWwindow* window) {
+    static double lastTime = glfwGetTime();
+    static unsigned int frameCount = 0;
+    static double fpsTimer = 0.0;
+    
     double currentTime = glfwGetTime();
+    
+    // Calculate delta time in seconds
+    delta_time = currentTime - lastTime;
+    lastTime = currentTime;
+    
+    // Clamp to prevent huge jumps
+    if (delta_time > 0.016f) { // ~60fps minimum
+        delta_time = 0.016f;
+    }
+    
+    // FPS display update
     frameCount++;
+    fpsTimer += delta_time;
     
-    // Calculate frame time in milliseconds
-    double frameTime = (currentTime - lastFrameTime) * 1000.0;
-    lastFrameTime = currentTime;
-    
-    // Update FPS counter every second
-    if (currentTime - lastTime >= 1.0) {
-        fps = frameCount / (currentTime - lastTime);
+    if (fpsTimer >= 1.0) {
+        fps = frameCount / fpsTimer;
         
         char title[256];
-        snprintf(title, sizeof(title), "C++ OpenGL 3D Engine - FPS: %.1f | Frame Time: %.2f ms", fps, frameTime);
+        snprintf(title, sizeof(title),
+            "C++ OpenGL 3D Engine - FPS: %.1f | Frame time: %.3f ms",
+            fps, delta_time * 1000.0);
         glfwSetWindowTitle(window, title);
+        
         frameCount = 0;
-        lastTime = currentTime;
+        fpsTimer = 0.0;
     }
 }
-
 // ============================================================================
 // LOAD TEXTURES
 // ============================================================================
@@ -467,28 +482,486 @@ Entity create_entity(const char* name, Mesh* mesh, Vec3 pos) {
     return entity;
 }
 
-// Global dynamic array
-std::vector<Entity> all_entities;
+// ============================================================================
+// CAMERA SYSTEM
+// ============================================================================
 
-void update_entity(const char* name, Vec3 pos, Vec3 rot, Vec3 scale) {
-    // Search for entity with given name
-    for (unsigned int i = 0; i < all_entities.size(); i++) {
-        if (all_entities[i].name == name) {
-            // Now update entity attributes
-            all_entities[i].position.x = pos.x;
-            all_entities[i].position.y = pos.y;
-            all_entities[i].position.z = pos.z;
-            
-            all_entities[i].rotation.x = rot.x;
-            all_entities[i].rotation.y = rot.y;
-            all_entities[i].rotation.z = rot.z;
-            
-            all_entities[i].scale.x = scale.x;
-            all_entities[i].scale.y = scale.y;
-            all_entities[i].scale.z = scale.z;
+typedef struct {
+    Vec3 position;
+    Vec3 front; // Direction camera is looking
+    Vec3 up;    // Up direction
+    Vec3 right; // Right direction
+
+    float yaw;   // Y-axis rotation
+    float pitch; // X-axis rotation
+
+    float fov;
+    float aspect_ratio;
+    float near_plane;
+    float far_plane;
+} Camera;
+
+Camera global_camera;
+
+Camera create_camera(float aspect) {
+    Camera cam;
+    cam.position = (Vec3){0, 0, 5};
+    cam.front = (Vec3){0, 0, -1};
+    cam.up = (Vec3){0, 1, 0};
+    cam.right = (Vec3){1, 0, 0};
+
+    cam.yaw = -90.0f;
+    cam.pitch = 0.0f;
+
+    cam.fov = M_PI / 4.0f; // 45 degrees in radians
+    cam.aspect_ratio = aspect;
+    cam.near_plane = 0.1f;
+    cam.far_plane = 100.0f;
+
+    return cam;
+}
+
+// Function to update camera's front, right, and up vectors based on yaw and pitch
+void camera_update_vectors(Camera* cam) {
+    // Calculate new front vector
+    cam->front.x = cosf(cam->yaw * (M_PI / 180.0f)) * cosf(cam->pitch * (M_PI / 180.0f));
+    cam->front.y = sinf(cam->pitch * (M_PI / 180.0f));
+    cam->front.z = sinf(cam->yaw * (M_PI / 180.0f)) * cosf(cam->pitch * (M_PI / 180.0f));
+    cam->front = vec3_normalize(cam->front);
+
+    // Calculate right and up vector
+    // OpenGL's world up is (0,1,0)
+    cam->right = vec3_normalize(vec3_cross(cam->front, (Vec3){0, 1, 0}));
+    cam->up = vec3_normalize(vec3_cross(cam->right, cam->front));
+}
+
+Mat4 camera_get_projection(Camera* cam) {
+    return mat4_perspective(cam->fov, cam->aspect_ratio, cam->near_plane, cam->far_plane);
+}
+
+// Calculates the view matrix using the LookAt function
+Mat4 camera_get_view_matrix(Camera* cam) {
+    Vec3 target = vec3_add(cam->position, cam->front);
+    return mat4_look_at(cam->position, target, cam->up);
+}
+
+// ============================================================================
+// SHADER SYSTEM
+// ============================================================================
+
+typedef struct {
+    unsigned int program;
+    int mvp_location; // Model-View-Projection matrix uniform location
+    int texture_location;
+} Shader;
+
+const char* vertex_shader = "#version 330 core\n"
+    "layout (location = 0) in vec3 aPos;\n"
+    "layout (location = 1) in vec4 aColor;\n"
+    "layout (location = 2) in vec2 aTexCoord;\n"
+    "out vec4 vertexColor;\n"
+    "out vec2 TexCoord;\n"
+    "uniform mat4 uMVP;\n"
+    "void main() {\n"
+    "    gl_Position = uMVP * vec4(aPos, 1.0);\n"
+    "    vertexColor = aColor;\n"
+    "    TexCoord = aTexCoord;\n"
+    "}\0";
+
+const char* fragment_shader = "#version 330 core\n"
+    "in vec4 vertexColor;\n"
+    "in vec2 TexCoord;\n"
+    "out vec4 FragColor;\n"
+    "uniform sampler2D u_texture;\n"
+    "void main() {\n"
+    "   FragColor = texture(u_texture, TexCoord) * vertexColor;\n"
+    "   if (FragColor.a == 0.0f) {\n"
+    "       discard;\n"
+    "   }\n"
+    "}\0";
+
+Shader create_shader() {
+    // Compile vertex shader
+    unsigned int vertexShader = glCreateShader(GL_VERTEX_SHADER);
+    glShaderSource(vertexShader, 1, &vertex_shader, NULL);
+    glCompileShader(vertexShader);
+    
+    // Check vertex shader compilation
+    int success;
+    char infoLog[512];
+    glGetShaderiv(vertexShader, GL_COMPILE_STATUS, &success);
+    if (!success) {
+        glGetShaderInfoLog(vertexShader, 512, NULL, infoLog);
+        printf("Vertex shader compilation failed: %s\n", infoLog);
+    }
+
+    // Compile fragment shader
+    unsigned int fragmentShader = glCreateShader(GL_FRAGMENT_SHADER);
+    glShaderSource(fragmentShader, 1, &fragment_shader, NULL);
+    glCompileShader(fragmentShader);
+    
+    // Check fragment shader compilation
+    glGetShaderiv(fragmentShader, GL_COMPILE_STATUS, &success);
+    if (!success) {
+        glGetShaderInfoLog(fragmentShader, 512, NULL, infoLog);
+        printf("Fragment shader compilation failed: %s\n", infoLog);
+    }
+
+    // Link shader program
+    unsigned int program = glCreateProgram();
+    glAttachShader(program, vertexShader);
+    glAttachShader(program, fragmentShader);
+    glLinkProgram(program);
+    
+    // Check program linking
+    glGetProgramiv(program, GL_LINK_STATUS, &success);
+    if (!success) {
+        glGetProgramInfoLog(program, 512, NULL, infoLog);
+        printf("Shader program linking failed: %s\n", infoLog);
+    }
+
+    glDeleteShader(vertexShader);
+    glDeleteShader(fragmentShader);
+
+    Shader shader;
+    shader.program = program;
+    shader.mvp_location = glGetUniformLocation(program, "uMVP");
+    shader.texture_location = glGetUniformLocation(program, "u_texture");
+
+    return shader;
+}
+
+// ============================================================================
+// SKYBOX SHADER SYSTEM
+// ============================================================================
+
+typedef struct {
+    unsigned int program;
+    int view_location;
+    int projection_location;
+    int skybox_location;
+} SkyboxShader;
+
+const char* skybox_vertex_shader = "#version 330 core\n"
+    "layout (location = 0) in vec3 aPos;\n"
+    "out vec3 TexCoords;\n"
+    "uniform mat4 projection;\n"
+    "uniform mat4 view;\n"
+    "void main() {\n"
+    "    TexCoords = aPos;\n"
+    "    vec4 pos = projection * view * vec4(aPos, 1.0);\n"
+    "    gl_Position = pos.xyww;\n" // Make skybox always at far plane
+    "}\0";
+
+const char* skybox_fragment_shader = "#version 330 core\n"
+    "out vec4 FragColor;\n"
+    "in vec3 TexCoords;\n"
+    "uniform samplerCube skybox;\n"
+    "void main() {\n"
+    "    FragColor = texture(skybox, TexCoords);\n"
+    "}\0";
+
+SkyboxShader create_skybox_shader() {
+    // Compile vertex shader
+    unsigned int vertexShader = glCreateShader(GL_VERTEX_SHADER);
+    glShaderSource(vertexShader, 1, &skybox_vertex_shader, NULL);
+    glCompileShader(vertexShader);
+    
+    int success;
+    char infoLog[512];
+    glGetShaderiv(vertexShader, GL_COMPILE_STATUS, &success);
+    if (!success) {
+        glGetShaderInfoLog(vertexShader, 512, NULL, infoLog);
+        printf("Skybox vertex shader compilation failed: %s\n", infoLog);
+    }
+
+    // Compile fragment shader
+    unsigned int fragmentShader = glCreateShader(GL_FRAGMENT_SHADER);
+    glShaderSource(fragmentShader, 1, &skybox_fragment_shader, NULL);
+    glCompileShader(fragmentShader);
+    
+    glGetShaderiv(fragmentShader, GL_COMPILE_STATUS, &success);
+    if (!success) {
+        glGetShaderInfoLog(fragmentShader, 512, NULL, infoLog);
+        printf("Skybox fragment shader compilation failed: %s\n", infoLog);
+    }
+
+    // Link shader program
+    unsigned int program = glCreateProgram();
+    glAttachShader(program, vertexShader);
+    glAttachShader(program, fragmentShader);
+    glLinkProgram(program);
+    
+    glGetProgramiv(program, GL_LINK_STATUS, &success);
+    if (!success) {
+        glGetProgramInfoLog(program, 512, NULL, infoLog);
+        printf("Skybox shader program linking failed: %s\n", infoLog);
+    }
+
+    glDeleteShader(vertexShader);
+    glDeleteShader(fragmentShader);
+
+    SkyboxShader shader;
+    shader.program = program;
+    shader.view_location = glGetUniformLocation(program, "view");
+    shader.projection_location = glGetUniformLocation(program, "projection");
+    shader.skybox_location = glGetUniformLocation(program, "skybox");
+
+    return shader;
+}
+
+// ============================================================================
+// RENDERER SYSTEM
+// ============================================================================
+
+typedef struct {
+    Shader shader;
+} Renderer;
+
+void renderer_init(Renderer* renderer, float aspect) {
+    renderer->shader = create_shader();
+    global_camera = create_camera(aspect);
+
+    glEnable(GL_DEPTH_TEST);
+    glDepthFunc(GL_LESS);
+    
+    // glEnable(GL_BLEND);
+    // glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glEnable(GL_ALPHA_TEST);
+    glAlphaFunc(GL_GREATER, 0.1f);
+}
+
+void draw_obj_mesh(Renderer* renderer, Entity* entity, Mesh* mesh) {
+    if (!entity->active || mesh->TRIANGLE_COUNT == 0) return;
+    
+    // Set up culling based on mesh's cull mode
+    switch (mesh->cull_mode) {
+        case CULL_NONE:
+            glDisable(GL_CULL_FACE);
+            break;
+        case CULL_BACK:
+            glEnable(GL_CULL_FACE);
+            glCullFace(GL_BACK);
+            break;
+        case CULL_FRONT:
+            glEnable(GL_CULL_FACE);
+            glCullFace(GL_FRONT);
+            break;
+    }
+    
+    // Calculate transformation matrices
+    Mat4 scale_matrix = mat4_scale(entity->scale);
+    Mat4 rotation_x = mat4_rotate_x(entity->rotation.x);
+    Mat4 rotation_y = mat4_rotate_y(entity->rotation.y);
+    Mat4 rotation_z = mat4_rotate_z(entity->rotation.z);
+    Mat4 rotation = mat4_multiply(rotation_z, mat4_multiply(rotation_y, rotation_x));
+    Mat4 translation = mat4_translate(entity->position);
+    Mat4 model = mat4_multiply(translation, mat4_multiply(rotation, scale_matrix));
+    Mat4 mvp = mat4_multiply(projection, mat4_multiply(view, model));
+    
+    // Use shader and set uniforms
+    glUseProgram(renderer->shader.program);
+    glUniformMatrix4fv(renderer->shader.mvp_location, 1, GL_FALSE, mvp.m);
+    
+    // Bind texture
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, mesh->texture_id);
+    glUniform1i(renderer->shader.texture_location, 0);
+    
+    // Draw vertices
+    glBindVertexArray(mesh->VAO);
+    glDrawArrays(GL_TRIANGLES, 0, mesh->TRIANGLE_COUNT * 3);
+    glBindVertexArray(0);
+}
+
+// ============================================================================
+// SKYBOX CLASS
+// ============================================================================
+
+class Skybox {
+public:
+    GLuint VAO, VBO;
+    GLuint cubemap_texture;
+    SkyboxShader shader;
+    
+    Skybox() : VAO(0), VBO(0), cubemap_texture(0) {}
+    
+    ~Skybox() {
+        cleanup();
+    }
+    
+    void init(const char* faces[6]) {
+        // Load cubemap texture
+        cubemap_texture = loadCubemap(faces);
+        
+        // Create shader
+        shader = create_skybox_shader();
+        
+        // Set up vertex data
+        glGenVertexArrays(1, &VAO);
+        glGenBuffers(1, &VBO);
+        
+        glBindVertexArray(VAO);
+        glBindBuffer(GL_ARRAY_BUFFER, VBO);
+        glBufferData(GL_ARRAY_BUFFER, sizeof(SKYBOX_VERTICES), &SKYBOX_VERTICES, GL_STATIC_DRAW);
+        
+        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)0);
+        glEnableVertexAttribArray(0);
+        
+        glBindVertexArray(0);
+    }
+    
+    void render(Camera* camera) {
+        // Change depth function so depth test passes when values are equal to depth buffer's content
+        glDepthFunc(GL_LEQUAL);
+        
+        glUseProgram(shader.program);
+        
+        // Remove translation from the view matrix (only keep rotation)
+        Mat4 view = camera_get_view_matrix(camera);
+        // Zero out the translation part (last column)
+        view.m[12] = 0.0f;
+        view.m[13] = 0.0f;
+        view.m[14] = 0.0f;
+        
+        Mat4 projection = camera_get_projection(camera);
+        
+        glUniformMatrix4fv(shader.view_location, 1, GL_FALSE, view.m);
+        glUniformMatrix4fv(shader.projection_location, 1, GL_FALSE, projection.m);
+        
+        // Bind skybox texture
+        glBindVertexArray(VAO);
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_CUBE_MAP, cubemap_texture);
+        glUniform1i(shader.skybox_location, 0);
+        
+        glDrawArrays(GL_TRIANGLES, 0, 36);
+        glBindVertexArray(0);
+        
+        // Set depth function back to default
+        glDepthFunc(GL_LESS);
+    }
+    
+    void cleanup() {
+        if (VAO != 0) glDeleteVertexArrays(1, &VAO);
+        if (VBO != 0) glDeleteBuffers(1, &VBO);
+        if (cubemap_texture != 0) glDeleteTextures(1, &cubemap_texture);
+        if (shader.program != 0) glDeleteProgram(shader.program);
+        
+        VAO = VBO = cubemap_texture = 0;
+        shader.program = 0;
+    }
+};
+
+// ============================================================================
+// ENTITY OPERATIONS
+// ============================================================================
+
+class EntityManager {
+private:
+    std::vector<Entity> entities;
+    std::vector<bool> active_flags;
+
+public:
+    // Add entity and return its index
+    size_t addEntity(const Entity& entity) {
+        // Try to find an inactive slot first
+        for (size_t i = 0; i < active_flags.size(); i++) {
+            if (!active_flags[i]) {
+                entities[i] = entity;
+                active_flags[i] = true;
+                return i;
+            }
+        }
+        
+        // No free slot, add to end
+        entities.push_back(entity);
+        active_flags.push_back(true);
+        return entities.size() - 1;
+    }
+    
+    // Remove entity by index
+    void removeEntity(size_t index) {
+        if (index < active_flags.size()) {
+            active_flags[index] = false;
+            entities[index].active = 0;
         }
     }
-}
+    
+    // Remove entity by name
+    bool removeEntity(const char* name) {
+        for (size_t i = 0; i < entities.size(); i++) {
+            if (active_flags[i] && strcmp(entities[i].name, name) == 0) {
+                removeEntity(i);
+                return true;
+            }
+        }
+        return false;
+    }
+    
+    // Get entity by name
+    int findEntity(const char* name) {
+        for (unsigned int i = 0; i < entities.size(); i++) {
+            if (active_flags[i] && strcmp(entities[i].name, name) == 0) {
+                return i;
+            }
+        }
+        return -1;
+    }
+    
+    // Update entity by name
+    bool updateEntity(const char* name, Vec3 pos, Vec3 rot, Vec3 scale) {
+        int i = findEntity(name);
+        if (i == -1) {
+            return false;
+        } else {
+            while (i < entities.size() && entities[i].name == name) {
+                entities[i].position = pos;
+                entities[i].rotation = rot;
+                entities[i].scale = scale;
+                i++;
+            }
+            return true;
+        }
+    }
+    
+    // Render all active entities
+    void renderAll(Renderer* renderer) {
+        for (size_t i = 0; i < entities.size(); i++) {
+            if (active_flags[i] && entities[i].active) {
+                draw_obj_mesh(renderer, &entities[i], entities[i].mesh);
+            }
+        }
+    }
+    
+    // Clean up inactive entities periodically
+    void compactEntities() {
+        size_t write_pos = 0;
+        for (size_t read_pos = 0; read_pos < entities.size(); read_pos++) {
+            if (active_flags[read_pos]) {
+                if (write_pos != read_pos) {
+                    entities[write_pos] = entities[read_pos];
+                    active_flags[write_pos] = true;
+                }
+                write_pos++;
+            }
+        }
+        entities.resize(write_pos);
+        active_flags.resize(write_pos);
+    }
+    
+    size_t size() const { return entities.size(); }
+    
+    size_t activeCount() const {
+        return std::count(active_flags.begin(), active_flags.end(), true);
+    }
+    
+    // Get all entities (for debugging or direct access)
+    const std::vector<Entity>& getAllEntities() const { return entities; }
+    const std::vector<bool>& getActiveFlags() const { return active_flags; }
+};
+
+EntityManager entity_manager;
 
 // ============================================================================
 // OBJ AND MTL FILE IMPORTERS
@@ -831,7 +1304,7 @@ OBJModel* loadOBJWithMTL(const char* obj_path) {
     return model;
 }
 
-std::vector<Mesh*> create_mesh_with_obj(const char* name, const char* obj_path, Vec3 center, float size) {
+std::vector<Mesh*> create_mesh_with_obj(const char* name, const char* obj_path, Vec3 center, Vec3 scale) {
     OBJModel* model = loadOBJWithMTL(obj_path);
     if (!model) {
         printf("Failed to load OBJ file with materials: %s\n", obj_path);
@@ -879,9 +1352,9 @@ std::vector<Mesh*> create_mesh_with_obj(const char* name, const char* obj_path, 
                 
                 // Position
                 Vec3 pos = model->vertices[face->v];
-                vertices.push_back(pos.x * size + center.x);
-                vertices.push_back(pos.y * size + center.y);
-                vertices.push_back(pos.z * size + center.z);
+                vertices.push_back(pos.x * scale.x + center.x);
+                vertices.push_back(pos.y * scale.y + center.y);
+                vertices.push_back(pos.z * scale.z + center.z);
                 
                 // Color
                 vertices.push_back(model->materials[mat_idx].diffuse_color.r);
@@ -962,383 +1435,13 @@ std::vector<Mesh*> create_mesh_with_obj(const char* name, const char* obj_path, 
         
     // Create entities
     for (Mesh* mesh : meshes) {
-        all_entities.push_back(create_entity(name, mesh, center));
+        Entity new_entity = create_entity(name, mesh, center);
+        entity_manager.addEntity(new_entity);
     }
     
     entity_count++;
     return meshes;
 }
-
-// ============================================================================
-// CAMERA SYSTEM
-// ============================================================================
-
-typedef struct {
-    Vec3 position;
-    Vec3 front; // Direction camera is looking
-    Vec3 up;    // Up direction
-    Vec3 right; // Right direction
-
-    float yaw;   // Y-axis rotation
-    float pitch; // X-axis rotation
-
-    float fov;
-    float aspect_ratio;
-    float near_plane;
-    float far_plane;
-} Camera;
-
-Camera global_camera;
-
-Camera create_camera(float aspect) {
-    Camera cam;
-    cam.position = (Vec3){0, 0, 5};
-    cam.front = (Vec3){0, 0, -1};
-    cam.up = (Vec3){0, 1, 0};
-    cam.right = (Vec3){1, 0, 0};
-
-    cam.yaw = -90.0f;
-    cam.pitch = 0.0f;
-
-    cam.fov = M_PI / 4.0f; // 45 degrees in radians
-    cam.aspect_ratio = aspect;
-    cam.near_plane = 0.1f;
-    cam.far_plane = 100.0f;
-
-    return cam;
-}
-
-// Function to update camera's front, right, and up vectors based on yaw and pitch
-void camera_update_vectors(Camera* cam) {
-    // Calculate new front vector
-    cam->front.x = cosf(cam->yaw * (M_PI / 180.0f)) * cosf(cam->pitch * (M_PI / 180.0f));
-    cam->front.y = sinf(cam->pitch * (M_PI / 180.0f));
-    cam->front.z = sinf(cam->yaw * (M_PI / 180.0f)) * cosf(cam->pitch * (M_PI / 180.0f));
-    cam->front = vec3_normalize(cam->front);
-
-    // Calculate right and up vector
-    // OpenGL's world up is (0,1,0)
-    cam->right = vec3_normalize(vec3_cross(cam->front, (Vec3){0, 1, 0}));
-    cam->up = vec3_normalize(vec3_cross(cam->right, cam->front));
-}
-
-Mat4 camera_get_projection(Camera* cam) {
-    return mat4_perspective(cam->fov, cam->aspect_ratio, cam->near_plane, cam->far_plane);
-}
-
-// Calculates the view matrix using the LookAt function
-Mat4 camera_get_view_matrix(Camera* cam) {
-    Vec3 target = vec3_add(cam->position, cam->front);
-    return mat4_look_at(cam->position, target, cam->up);
-}
-
-// ============================================================================
-// SHADER SYSTEM
-// ============================================================================
-
-typedef struct {
-    unsigned int program;
-    int mvp_location; // Model-View-Projection matrix uniform location
-    int texture_location;
-} Shader;
-
-const char* vertex_shader = "#version 330 core\n"
-    "layout (location = 0) in vec3 aPos;\n"
-    "layout (location = 1) in vec4 aColor;\n"
-    "layout (location = 2) in vec2 aTexCoord;\n"
-    "out vec4 vertexColor;\n"
-    "out vec2 TexCoord;\n"
-    "uniform mat4 uMVP;\n"
-    "void main() {\n"
-    "    gl_Position = uMVP * vec4(aPos, 1.0);\n"
-    "    vertexColor = aColor;\n"
-    "    TexCoord = aTexCoord;\n"
-    "}\0";
-
-const char* fragment_shader = "#version 330 core\n"
-    "in vec4 vertexColor;\n"
-    "in vec2 TexCoord;\n"
-    "out vec4 FragColor;\n"
-    "uniform sampler2D u_texture;\n"
-    "void main() {\n"
-    "   FragColor = texture(u_texture, TexCoord) * vertexColor;\n"
-    "   if (FragColor.a < 0.1f) {\n"
-    "       discard;\n"
-    "   }\n"
-    "}\0";
-
-Shader create_shader() {
-    // Compile vertex shader
-    unsigned int vertexShader = glCreateShader(GL_VERTEX_SHADER);
-    glShaderSource(vertexShader, 1, &vertex_shader, NULL);
-    glCompileShader(vertexShader);
-    
-    // Check vertex shader compilation
-    int success;
-    char infoLog[512];
-    glGetShaderiv(vertexShader, GL_COMPILE_STATUS, &success);
-    if (!success) {
-        glGetShaderInfoLog(vertexShader, 512, NULL, infoLog);
-        printf("Vertex shader compilation failed: %s\n", infoLog);
-    }
-
-    // Compile fragment shader
-    unsigned int fragmentShader = glCreateShader(GL_FRAGMENT_SHADER);
-    glShaderSource(fragmentShader, 1, &fragment_shader, NULL);
-    glCompileShader(fragmentShader);
-    
-    // Check fragment shader compilation
-    glGetShaderiv(fragmentShader, GL_COMPILE_STATUS, &success);
-    if (!success) {
-        glGetShaderInfoLog(fragmentShader, 512, NULL, infoLog);
-        printf("Fragment shader compilation failed: %s\n", infoLog);
-    }
-
-    // Link shader program
-    unsigned int program = glCreateProgram();
-    glAttachShader(program, vertexShader);
-    glAttachShader(program, fragmentShader);
-    glLinkProgram(program);
-    
-    // Check program linking
-    glGetProgramiv(program, GL_LINK_STATUS, &success);
-    if (!success) {
-        glGetProgramInfoLog(program, 512, NULL, infoLog);
-        printf("Shader program linking failed: %s\n", infoLog);
-    }
-
-    glDeleteShader(vertexShader);
-    glDeleteShader(fragmentShader);
-
-    Shader shader;
-    shader.program = program;
-    shader.mvp_location = glGetUniformLocation(program, "uMVP");
-    shader.texture_location = glGetUniformLocation(program, "u_texture");
-
-    return shader;
-}
-
-// ============================================================================
-// SKYBOX SHADER SYSTEM
-// ============================================================================
-
-typedef struct {
-    unsigned int program;
-    int view_location;
-    int projection_location;
-    int skybox_location;
-} SkyboxShader;
-
-const char* skybox_vertex_shader = "#version 330 core\n"
-    "layout (location = 0) in vec3 aPos;\n"
-    "out vec3 TexCoords;\n"
-    "uniform mat4 projection;\n"
-    "uniform mat4 view;\n"
-    "void main() {\n"
-    "    TexCoords = aPos;\n"
-    "    vec4 pos = projection * view * vec4(aPos, 1.0);\n"
-    "    gl_Position = pos.xyww;\n" // Make skybox always at far plane
-    "}\0";
-
-const char* skybox_fragment_shader = "#version 330 core\n"
-    "out vec4 FragColor;\n"
-    "in vec3 TexCoords;\n"
-    "uniform samplerCube skybox;\n"
-    "void main() {\n"
-    "    FragColor = texture(skybox, TexCoords);\n"
-    "}\0";
-
-SkyboxShader create_skybox_shader() {
-    // Compile vertex shader
-    unsigned int vertexShader = glCreateShader(GL_VERTEX_SHADER);
-    glShaderSource(vertexShader, 1, &skybox_vertex_shader, NULL);
-    glCompileShader(vertexShader);
-    
-    int success;
-    char infoLog[512];
-    glGetShaderiv(vertexShader, GL_COMPILE_STATUS, &success);
-    if (!success) {
-        glGetShaderInfoLog(vertexShader, 512, NULL, infoLog);
-        printf("Skybox vertex shader compilation failed: %s\n", infoLog);
-    }
-
-    // Compile fragment shader
-    unsigned int fragmentShader = glCreateShader(GL_FRAGMENT_SHADER);
-    glShaderSource(fragmentShader, 1, &skybox_fragment_shader, NULL);
-    glCompileShader(fragmentShader);
-    
-    glGetShaderiv(fragmentShader, GL_COMPILE_STATUS, &success);
-    if (!success) {
-        glGetShaderInfoLog(fragmentShader, 512, NULL, infoLog);
-        printf("Skybox fragment shader compilation failed: %s\n", infoLog);
-    }
-
-    // Link shader program
-    unsigned int program = glCreateProgram();
-    glAttachShader(program, vertexShader);
-    glAttachShader(program, fragmentShader);
-    glLinkProgram(program);
-    
-    glGetProgramiv(program, GL_LINK_STATUS, &success);
-    if (!success) {
-        glGetProgramInfoLog(program, 512, NULL, infoLog);
-        printf("Skybox shader program linking failed: %s\n", infoLog);
-    }
-
-    glDeleteShader(vertexShader);
-    glDeleteShader(fragmentShader);
-
-    SkyboxShader shader;
-    shader.program = program;
-    shader.view_location = glGetUniformLocation(program, "view");
-    shader.projection_location = glGetUniformLocation(program, "projection");
-    shader.skybox_location = glGetUniformLocation(program, "skybox");
-
-    return shader;
-}
-
-// ============================================================================
-// RENDERER SYSTEM
-// ============================================================================
-
-typedef struct {
-    Shader shader;
-} Renderer;
-
-void renderer_init(Renderer* renderer, float aspect) {
-    renderer->shader = create_shader();
-    global_camera = create_camera(aspect);
-
-    glEnable(GL_DEPTH_TEST);
-    glDepthFunc(GL_LESS);
-    
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    glEnable(GL_ALPHA_TEST);
-    glAlphaFunc(GL_GREATER, 0.1f);
-}
-
-void draw_obj_mesh(Renderer* renderer, Entity* entity, Mesh* mesh) {
-    if (!entity->active || mesh->TRIANGLE_COUNT == 0) return;
-    
-    // Set up culling based on mesh's cull mode
-    switch (mesh->cull_mode) {
-        case CULL_NONE:
-            glDisable(GL_CULL_FACE);
-            break;
-        case CULL_BACK:
-            glEnable(GL_CULL_FACE);
-            glCullFace(GL_BACK);
-            break;
-        case CULL_FRONT:
-            glEnable(GL_CULL_FACE);
-            glCullFace(GL_FRONT);
-            break;
-    }
-    
-    // Calculate transformation matrices
-    Mat4 scale_matrix = mat4_scale(entity->scale);
-    Mat4 rotation_x = mat4_rotate_x(entity->rotation.x);
-    Mat4 rotation_y = mat4_rotate_y(entity->rotation.y);
-    Mat4 rotation_z = mat4_rotate_z(entity->rotation.z);
-    Mat4 rotation = mat4_multiply(rotation_z, mat4_multiply(rotation_y, rotation_x));
-    Mat4 translation = mat4_translate(entity->position);
-    Mat4 model = mat4_multiply(translation, mat4_multiply(rotation, scale_matrix));
-    Mat4 mvp = mat4_multiply(projection, mat4_multiply(view, model));
-    
-    // Use shader and set uniforms
-    glUseProgram(renderer->shader.program);
-    glUniformMatrix4fv(renderer->shader.mvp_location, 1, GL_FALSE, mvp.m);
-    
-    // Bind texture
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, mesh->texture_id);
-    glUniform1i(renderer->shader.texture_location, 0);
-    
-    // Draw vertices
-    glBindVertexArray(mesh->VAO);
-    glDrawArrays(GL_TRIANGLES, 0, mesh->TRIANGLE_COUNT * 3);
-    glBindVertexArray(0);
-}
-
-// ============================================================================
-// SKYBOX CLASS
-// ============================================================================
-
-class Skybox {
-public:
-    GLuint VAO, VBO;
-    GLuint cubemap_texture;
-    SkyboxShader shader;
-    
-    Skybox() : VAO(0), VBO(0), cubemap_texture(0) {}
-    
-    ~Skybox() {
-        cleanup();
-    }
-    
-    void init(const char* faces[6]) {
-        // Load cubemap texture
-        cubemap_texture = loadCubemap(faces);
-        
-        // Create shader
-        shader = create_skybox_shader();
-        
-        // Set up vertex data
-        glGenVertexArrays(1, &VAO);
-        glGenBuffers(1, &VBO);
-        
-        glBindVertexArray(VAO);
-        glBindBuffer(GL_ARRAY_BUFFER, VBO);
-        glBufferData(GL_ARRAY_BUFFER, sizeof(SKYBOX_VERTICES), &SKYBOX_VERTICES, GL_STATIC_DRAW);
-        
-        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)0);
-        glEnableVertexAttribArray(0);
-        
-        glBindVertexArray(0);
-    }
-    
-    void render(Camera* camera) {
-        // Change depth function so depth test passes when values are equal to depth buffer's content
-        glDepthFunc(GL_LEQUAL);
-        
-        glUseProgram(shader.program);
-        
-        // Remove translation from the view matrix (only keep rotation)
-        Mat4 view = camera_get_view_matrix(camera);
-        // Zero out the translation part (last column)
-        view.m[12] = 0.0f;
-        view.m[13] = 0.0f;
-        view.m[14] = 0.0f;
-        
-        Mat4 projection = camera_get_projection(camera);
-        
-        glUniformMatrix4fv(shader.view_location, 1, GL_FALSE, view.m);
-        glUniformMatrix4fv(shader.projection_location, 1, GL_FALSE, projection.m);
-        
-        // Bind skybox texture
-        glBindVertexArray(VAO);
-        glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_CUBE_MAP, cubemap_texture);
-        glUniform1i(shader.skybox_location, 0);
-        
-        glDrawArrays(GL_TRIANGLES, 0, 36);
-        glBindVertexArray(0);
-        
-        // Set depth function back to default
-        glDepthFunc(GL_LESS);
-    }
-    
-    void cleanup() {
-        if (VAO != 0) glDeleteVertexArrays(1, &VAO);
-        if (VBO != 0) glDeleteBuffers(1, &VBO);
-        if (cubemap_texture != 0) glDeleteTextures(1, &cubemap_texture);
-        if (shader.program != 0) glDeleteProgram(shader.program);
-        
-        VAO = VBO = cubemap_texture = 0;
-        shader.program = 0;
-    }
-};
 
 // ============================================================================
 // MAIN ENGINE LOOP
@@ -1399,8 +1502,10 @@ int main() {
     // ============================================================================
     
     // Create all scene entities
-    create_mesh_with_obj("tree_mesh", "tree.obj", (Vec3){0, 0, 0}, 2.0f);
+    create_mesh_with_obj("tree_mesh", "tree.obj", (Vec3){0, 0, -5}, (Vec3){2, 2, 2});
+    create_mesh_with_obj("cube_mesh", "cube.obj", (Vec3){0, 0, -5}, (Vec3){1, 1, 1});
     
+    printf("========== SCENE STATS ==========\n");
     printf("Total triangles: %d\n", total_triangles);
     printf("Game objects: %d\n", entity_count);
     printf("Controls: WASD to move, mouse to look around, E/Q to move up/down, ESC to exit\n");
@@ -1419,7 +1524,7 @@ int main() {
             float cos_yaw = cosf(yaw_rad);
             Vec3 cam_offset = {0, 0, 0};
             
-            float camera_speed = 0.05f;
+            float camera_speed = 5.0f * delta_time;
             if (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_RIGHT_SHIFT) == GLFW_PRESS) {
                 camera_speed *= 2;
             }
@@ -1452,13 +1557,20 @@ int main() {
             // UPDATE ENTITIES
             // ============================================================================
             
-            update_entity("tree_mesh", (Vec3){static_cast<float>(frameCount), 0, 0}, (Vec3){0, 0, 0}, (Vec3){1, 1, 1});
+            entity_manager.updateEntity("cube_mesh",
+                          (Vec3){5, 0, -5},
+                          (Vec3){frame_count, frame_count, frame_count},
+                          (Vec3){sinf(frame_count) * 0.5f, sinf(frame_count) * 0.5f, sinf(frame_count) * 0.5f});
+            
+            frame_count += delta_time;
+            
+            // Cleanup entities array
+            entity_manager.compactEntities();
         }
         
         glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-        
-        
+                
         // ============================================================================
         // RENDER ALL SCENE OBJECTS
         // ============================================================================
@@ -1467,9 +1579,7 @@ int main() {
         skybox.render(&global_camera);
         
         // Render regular objects
-        for (unsigned int i = 0; i < all_entities.size(); i++) {
-            draw_obj_mesh(&renderer, &all_entities[i], all_entities[i].mesh);
-        }
+        entity_manager.renderAll(&renderer);
         
         glfwSwapBuffers(window);
         
