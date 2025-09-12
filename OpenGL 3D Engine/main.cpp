@@ -33,8 +33,9 @@ bool paused = false;
 // Engine variables
 unsigned int total_triangles = 0;
 unsigned int entity_count = 0;
-float frame_count = 0;
-float delta_time = 1.0f;
+float update_count = 0;
+float frame_time = 1.0f;
+float speed_multiplier = 1.0f;
 
 // Global mesh registry for cleanup
 std::unordered_set<class Mesh*> global_mesh_registry;
@@ -52,17 +53,14 @@ void updateFPS(GLFWwindow* window) {
     double currentTime = glfwGetTime();
     
     // Calculate delta time in seconds
-    delta_time = currentTime - lastTime;
+    frame_time = currentTime - lastTime;
     lastTime = currentTime;
     
-    // Clamp to prevent huge jumps
-    if (delta_time > 0.016f) { // ~60fps minimum
-        delta_time = 0.016f;
-    }
+    speed_multiplier = frame_time / 0.0083f;
     
     // FPS display update
     frameCount++;
-    fpsTimer += delta_time;
+    fpsTimer += frame_time;
     
     if (fpsTimer >= 1.0) {
         fps = frameCount / fpsTimer;
@@ -70,7 +68,7 @@ void updateFPS(GLFWwindow* window) {
         char title[256];
         snprintf(title, sizeof(title),
             "C++ OpenGL 3D Engine - FPS: %.1f | Frame time: %.3f ms",
-            fps, delta_time * 1000.0);
+            fps, frame_time * 1000.0);
         glfwSetWindowTitle(window, title);
         
         frameCount = 0;
@@ -87,7 +85,6 @@ GLuint loadTexture(const char* path) {
     // Load image data
     unsigned char* data = stbi_load(path, &width, &height, &channels, 0);
     if (!data) {
-        std::cerr << "Failed to load texture: " << path << std::endl;
         return 0;
     }
     
@@ -130,6 +127,8 @@ GLuint loadTexture(const char* path) {
 typedef struct {
     float x, y, z;
 } Vec3;
+
+const Vec3 VEC3_NO_CHANGE = {NAN, NAN, NAN};
 
 typedef struct {
     float m[16]; // 4x4 matrix stored column-major
@@ -471,12 +470,15 @@ typedef struct {
 } Entity;
 
 // Create entity
-Entity create_entity(const char* name, Mesh* mesh, Vec3 pos) {
+Entity create_entity(const char* name, Mesh* mesh, Vec3 pos, Vec3 rotation, Vec3 scale) {
     Entity entity;
     entity.name = name;
     entity.position = pos;
-    entity.rotation = (Vec3){0, 0, 0};
-    entity.scale = (Vec3){1, 1, 1};
+    // Convert from degrees to radians
+    entity.rotation.x = rotation.x * M_PI / 180.0f;
+    entity.rotation.y = rotation.y * M_PI / 180.0f;
+    entity.rotation.z = rotation.z * M_PI / 180.0f;
+    entity.scale = scale;
     entity.mesh = mesh;
     entity.active = 1;
     return entity;
@@ -505,7 +507,7 @@ Camera global_camera;
 
 Camera create_camera(float aspect) {
     Camera cam;
-    cam.position = (Vec3){0, 0, 5};
+    cam.position = (Vec3){0, 0, 0};
     cam.front = (Vec3){0, 0, -1};
     cam.up = (Vec3){0, 1, 0};
     cam.right = (Vec3){1, 0, 0};
@@ -516,7 +518,7 @@ Camera create_camera(float aspect) {
     cam.fov = M_PI / 4.0f; // 45 degrees in radians
     cam.aspect_ratio = aspect;
     cam.near_plane = 0.1f;
-    cam.far_plane = 100.0f;
+    cam.far_plane = 500.0f;
 
     return cam;
 }
@@ -725,10 +727,10 @@ void renderer_init(Renderer* renderer, float aspect) {
     glEnable(GL_DEPTH_TEST);
     glDepthFunc(GL_LESS);
     
-    // glEnable(GL_BLEND);
-    // glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     glEnable(GL_ALPHA_TEST);
-    glAlphaFunc(GL_GREATER, 0.1f);
+    glAlphaFunc(GL_NOTEQUAL, 0.0f);
 }
 
 void draw_obj_mesh(Renderer* renderer, Entity* entity, Mesh* mesh) {
@@ -910,15 +912,25 @@ public:
     }
     
     // Update entity by name
-    bool updateEntity(const char* name, Vec3 pos, Vec3 rot, Vec3 scale) {
+    
+    bool updateEntity(const char* name, const Vec3& pos, const Vec3& rot, const Vec3& scale) {
         int i = findEntity(name);
         if (i == -1) {
             return false;
         } else {
-            while (i < entities.size() && entities[i].name == name) {
-                entities[i].position = pos;
-                entities[i].rotation = rot;
-                entities[i].scale = scale;
+            while (i < entities.size() && strcmp(entities[i].name, name) == 0) {
+                if (!isnan(pos.x) || !isnan(pos.y) || !isnan(pos.z)) {
+                    entities[i].position = pos;
+                }
+                if (!isnan(rot.x) || !isnan(rot.y) || !isnan(rot.z)) {
+                    // Convert from degrees to radians here, assuming the input is in degrees
+                    entities[i].rotation.x = rot.x * M_PI / 180.0f;
+                    entities[i].rotation.y = rot.y * M_PI / 180.0f;
+                    entities[i].rotation.z = rot.z * M_PI / 180.0f;
+                }
+                if (!isnan(scale.x) || !isnan(scale.y) || !isnan(scale.z)) {
+                    entities[i].scale = scale;
+                }
                 i++;
             }
             return true;
@@ -1304,7 +1316,7 @@ OBJModel* loadOBJWithMTL(const char* obj_path) {
     return model;
 }
 
-std::vector<Mesh*> create_mesh_with_obj(const char* name, const char* obj_path, Vec3 center, Vec3 scale) {
+std::vector<Mesh*> create_mesh_with_obj(const char* name, const char* obj_path, Vec3 center, Vec3 rotation, Vec3 scale) {
     OBJModel* model = loadOBJWithMTL(obj_path);
     if (!model) {
         printf("Failed to load OBJ file with materials: %s\n", obj_path);
@@ -1352,9 +1364,9 @@ std::vector<Mesh*> create_mesh_with_obj(const char* name, const char* obj_path, 
                 
                 // Position
                 Vec3 pos = model->vertices[face->v];
-                vertices.push_back(pos.x * scale.x + center.x);
-                vertices.push_back(pos.y * scale.y + center.y);
-                vertices.push_back(pos.z * scale.z + center.z);
+                vertices.push_back(pos.x);
+                vertices.push_back(pos.y);
+                vertices.push_back(pos.z);
                 
                 // Color
                 vertices.push_back(model->materials[mat_idx].diffuse_color.r);
@@ -1435,7 +1447,7 @@ std::vector<Mesh*> create_mesh_with_obj(const char* name, const char* obj_path, 
         
     // Create entities
     for (Mesh* mesh : meshes) {
-        Entity new_entity = create_entity(name, mesh, center);
+        Entity new_entity = create_entity(name, mesh, center, rotation, scale);
         entity_manager.addEntity(new_entity);
     }
     
@@ -1501,14 +1513,20 @@ int main() {
     // LOAD AND CREATE ALL GAME OBJECTS
     // ============================================================================
     
-    // Create all scene entities
-    create_mesh_with_obj("tree_mesh", "tree.obj", (Vec3){0, 0, -5}, (Vec3){2, 2, 2});
-    create_mesh_with_obj("cube_mesh", "cube.obj", (Vec3){0, 0, -5}, (Vec3){1, 1, 1});
+    // Static level mesh
+    create_mesh_with_obj("level", "level.obj", (Vec3){0, -1, -5}, (Vec3){90.0f, 0, 0}, (Vec3){10, 10, 10});
     
-    printf("========== SCENE STATS ==========\n");
+    // Tree mesh
+    create_mesh_with_obj("tree_mesh", "tree.obj", (Vec3){0, -1, -10}, (Vec3){0, 0, 0}, (Vec3){2, 2, 2});
+    
+    // Brick cube
+    create_mesh_with_obj("cube_mesh", "cube.obj", (Vec3){5, 1, -10}, (Vec3){0, 0, 0}, (Vec3){1, 1, 1});
+    
+    // Instructions panel
+    create_mesh_with_obj("instruction_panel", "quad.obj", (Vec3){0, 1, -5}, (Vec3){0, 0, 0}, (Vec3){1.92, 1.08, 1});
+    
     printf("Total triangles: %d\n", total_triangles);
     printf("Game objects: %d\n", entity_count);
-    printf("Controls: WASD to move, mouse to look around, E/Q to move up/down, ESC to exit\n");
     
     // ENGINE MAIN LOOP //
     
@@ -1524,7 +1542,7 @@ int main() {
             float cos_yaw = cosf(yaw_rad);
             Vec3 cam_offset = {0, 0, 0};
             
-            float camera_speed = 5.0f * delta_time;
+            float camera_speed = speed_multiplier * 0.05f;
             if (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_RIGHT_SHIFT) == GLFW_PRESS) {
                 camera_speed *= 2;
             }
@@ -1552,17 +1570,13 @@ int main() {
             view = camera_get_view_matrix(&global_camera);
             projection = camera_get_projection(&global_camera);
             
-            
             // ============================================================================
             // UPDATE ENTITIES
             // ============================================================================
             
-            entity_manager.updateEntity("cube_mesh",
-                          (Vec3){5, 0, -5},
-                          (Vec3){frame_count, frame_count, frame_count},
-                          (Vec3){sinf(frame_count) * 0.5f, sinf(frame_count) * 0.5f, sinf(frame_count) * 0.5f});
+            entity_manager.updateEntity("cube_mesh", VEC3_NO_CHANGE, (Vec3){update_count, update_count, update_count}, VEC3_NO_CHANGE);
             
-            frame_count += delta_time;
+            update_count += speed_multiplier;
             
             // Cleanup entities array
             entity_manager.compactEntities();
