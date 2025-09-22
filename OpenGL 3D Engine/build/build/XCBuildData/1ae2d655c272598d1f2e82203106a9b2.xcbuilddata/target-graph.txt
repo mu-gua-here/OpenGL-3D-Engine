@@ -1,0 +1,7 @@
+Target dependency graph (3 targets)
+Target 'OpenGL_3D_Engine' in project 'OpenGL_3D_Engine'
+➜ Explicit dependency on target 'ZERO_CHECK' in project 'OpenGL_3D_Engine'
+➜ Explicit dependency on target 'copy_assets' in project 'OpenGL_3D_Engine'
+Target 'copy_assets' in project 'OpenGL_3D_Engine'
+➜ Explicit dependency on target 'ZERO_CHECK' in project 'OpenGL_3D_Engine'
+Target 'ZERO_CHECK' in project 'OpenGL_3D_Engine' (no dependencies)
