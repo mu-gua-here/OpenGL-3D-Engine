@@ -45,7 +45,6 @@ float update_count = 0;
 float frame_time = 1.0f;
 float speed_multiplier = 1.0f;
 
-// Add the missing global variables
 GLuint default_texture_id = 0;
 glm::mat4 view;
 glm::mat4 projection;
@@ -1017,6 +1016,9 @@ int main() {
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
     glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
     
+    // Anti-aliaising
+    glfwWindowHint(GLFW_SAMPLES, 4);
+    
     GLFWwindow* window = glfwCreateWindow(800, 600, "C++ OpenGL 3D Engine", NULL, NULL);
     if (!window) {
         printf("Failed to create GLFW window\n");
@@ -1060,13 +1062,10 @@ int main() {
     glEnable(GL_DEPTH_TEST);
     glDepthFunc(GL_LESS);
     
-    // Anti-aliaising
-    glfwWindowHint(GLFW_SAMPLES, 4);
-    glEnable(GL_MULTISAMPLE);
-    
-    // Blend pixels
+    // OpenGL pixel functions
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glEnable(GL_MULTISAMPLE);
     
     // ============================================================================
     // CREATE SCENE OBJECTS
