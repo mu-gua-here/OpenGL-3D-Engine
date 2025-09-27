@@ -1,0 +1,9 @@
+# Ignore build directories and their contents
+build/
+
+# Common OS/IDE files to ignore
+.DS_Store
+*.swp
+
+# Xcode-specific files to ignore
+*.xcodeproj/xcuserdata/
