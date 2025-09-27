@@ -5,6 +5,12 @@
 //  Created by Ray Hsiao Muguang on 2025/9/15.
 //
 
+/* TO-DO LIST
+ 
+ 1. Add face culling system choices for each submesh
+ 
+ */
+
 // OpenGL internal
 #include <GLFW/glfw3.h>
 #include "glad/glad.h"
@@ -150,10 +156,6 @@ Material createDefaultMaterial() {
     default_mat.name = "default";
     default_mat.texture_id = default_texture_id;
     default_mat.diffuse_color = {1.0f, 1.0f, 1.0f, 1.0f};
-    default_mat.ambient = glm::vec3(0.1f);
-    default_mat.diffuse = glm::vec3(0.8f);
-    default_mat.specular = glm::vec3(0.5f);
-    default_mat.shininess = 32.0f;
     return default_mat;
 }
 
@@ -635,21 +637,32 @@ void main() {
     
     vec3 norm = normalize(Normal);
     vec3 finalLighting = vec3(0.0);
+    float face_mask = gl_FrontFacing ? 1.0 : 0.0; 
 
     for (int i = 0; i < lightCount && i < MAX_LIGHTS; i++) {
-        vec3 ambient = materialAmbient * lightColors[i] * 0.1;
+        // Ambient
+        vec3 ambient = materialAmbient * lightColors[i];
         
         vec3 lightDir = normalize(lightPositions[i] - FragPos);
-        float diff = max(dot(norm, lightDir), 0.0);
-        vec3 diffuse = diff * materialDiffuse * lightColors[i];
+        vec3 correctedNorm = norm;
+        if (dot(correctedNorm, lightDir) < 0.0) {
+            correctedNorm = -correctedNorm; // Flip the normal vector
+        }
+        
+        // Diffuse
+        float diff_intensity = max(dot(correctedNorm, lightDir), 0.0);
+        // Apply face_mask: Only light the 'front' side of the plane
+        vec3 diffuse = diff_intensity * face_mask * materialDiffuse * lightColors[i];
 
+        // Specular
         vec3 viewDir = normalize(viewPos - FragPos);
         vec3 halfwayDir = normalize(lightDir + viewDir);
-        float spec = pow(max(dot(norm, halfwayDir), 0.0), materialShininess);
-        vec3 specular = spec * materialSpecular * lightColors[i];
+        float spec_intensity = pow(max(dot(correctedNorm, halfwayDir), 0.0), materialShininess);
+        vec3 specular = spec_intensity * face_mask * materialSpecular * lightColors[i];
 
         finalLighting += (ambient + diffuse + specular) * lightIntensities[i];
     }
+
     FragColor = vec4(finalLighting, 1.0) * texColor * vertexColor;
 }
 )";
@@ -1066,7 +1079,6 @@ int main() {
     
     // CREATE LIGHT SOURCES //
     
-    createLightSource(glm::vec3(0, 0, 0), glm::vec3(1, 1, 1), 1.0f);
     createLightSource(glm::vec3(0, 10, 0), glm::vec3(1, 1, 1), 1.0f);
         
     // LOAD OBJ MESHES //
@@ -1081,7 +1093,7 @@ int main() {
     createEntity("level", level_mesh, glm::vec3(0, 0, 0), glm::vec3(0, 0, 0), glm::vec3(10, 10, 10));
     createEntity("tree", tree_mesh, glm::vec3(0, 0, 0), glm::vec3(0, 0, 0), glm::vec3(1, 1, 1));
     createEntity("instructions", instructions_mesh, glm::vec3(0, 2, 4), glm::vec3(0, 0, 0), glm::vec3(1, 1, 1));
-    createEntity("cube", cube_mesh, glm::vec3(5, 3, -6), glm::vec3(0, 0, 0), glm::vec3(1, 1, 1));
+    createEntity("cube", cube_mesh, glm::vec3(5, 3, 0), glm::vec3(0, 0, 0), glm::vec3(1, 1, 1));
     
     printf("Total triangles: %d\n", total_triangles);
     printf("Active entities: %zu\n", entity_manager.size());
@@ -1101,7 +1113,7 @@ int main() {
             // ============================================================================
             
             // UPDATE LIGHTS
-            lights[0].position = global_camera.position;
+            // lights[0].position = global_camera.position;
             
             // UPDATE OBJECTS
             entity_manager.updateEntity("cube", VEC3_NO_CHANGE, glm::vec3(update_count, update_count * 0.5f, 0), VEC3_NO_CHANGE);
