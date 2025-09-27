@@ -9,19 +9,19 @@
 /* Begin PBXAggregateTarget section */
 		4D848F44F0066ABB0CB40A2E /* copy_assets */ = {
 			isa = PBXAggregateTarget;
-			buildConfigurationList = BDCEB00817814024A748B7BE /* Build configuration list for PBXAggregateTarget "copy_assets" */;
+			buildConfigurationList = 1B46F7B1AD0E4A8B89707A11 /* Build configuration list for PBXAggregateTarget "copy_assets" */;
 			buildPhases = (
 				2B1E0A32073F9469FE705617 /* Generate CMakeFiles/copy_assets */,
 			);
 			dependencies = (
-				0086FE3A773545F69EB591A0 /* PBXTargetDependency */,
+				45BEB2BADDDD47FD8E33B836 /* PBXTargetDependency */,
 			);
 			name = copy_assets;
 			productName = copy_assets;
 		};
 		6A438E0777F0CE3D1A7CFCFF /* ZERO_CHECK */ = {
 			isa = PBXAggregateTarget;
-			buildConfigurationList = C1B681970FCE4875811ABFA9 /* Build configuration list for PBXAggregateTarget "ZERO_CHECK" */;
+			buildConfigurationList = 007BB1310C51429FA2981C08 /* Build configuration list for PBXAggregateTarget "ZERO_CHECK" */;
 			buildPhases = (
 				21A42BBF25EC71CCD5A8A6E1 /* Generate CMakeFiles/ZERO_CHECK */,
 			);
@@ -32,14 +32,14 @@
 		};
 		DB85C9EA969F232E0E620C77 /* ALL_BUILD */ = {
 			isa = PBXAggregateTarget;
-			buildConfigurationList = 31CDB444D2904674BDAE92A1 /* Build configuration list for PBXAggregateTarget "ALL_BUILD" */;
+			buildConfigurationList = F023E6073CA34E20A76880EF /* Build configuration list for PBXAggregateTarget "ALL_BUILD" */;
 			buildPhases = (
 				79FED89FDFCB1069B3D638AE /* Generate CMakeFiles/ALL_BUILD */,
 			);
 			dependencies = (
-				550FC1CE98424943A3C2F768 /* PBXTargetDependency */,
-				49942385428041E09E11304E /* PBXTargetDependency */,
-				7B9142772AF147D8AB01FB2D /* PBXTargetDependency */,
+				7A720AC4478F47429B8CA57B /* PBXTargetDependency */,
+				04B361D56A134AC0989DE73F /* PBXTargetDependency */,
+				2E8A886713904301B22F7A21 /* PBXTargetDependency */,
 			);
 			name = ALL_BUILD;
 			productName = ALL_BUILD;
@@ -47,98 +47,98 @@
 /* End PBXAggregateTarget section */
 
 /* Begin PBXBuildFile section */
-		58A8B79A8C3E47CDB6B544AB /* /Users/ray/Desktop/OpenGL 3D Engine/OpenGL 3D Engine/External/glad/src/glad.c */ = {isa = PBXBuildFile; fileRef = 7FEE91CD808B48ACA70DEBF2 /* /Users/ray/Desktop/OpenGL 3D Engine/OpenGL 3D Engine/External/glad/src/glad.c */; };
-		626E71E567E5405D8E5B8BE4 /* /Users/ray/Desktop/OpenGL 3D Engine/OpenGL 3D Engine/main.cpp */ = {isa = PBXBuildFile; fileRef = 386A3ED7D6A84D5D82AD9D70 /* /Users/ray/Desktop/OpenGL 3D Engine/OpenGL 3D Engine/main.cpp */; };
-		9DCC5DA8E9EA4C50884B6DF1 /* /Users/ray/Desktop/OpenGL 3D Engine/OpenGL 3D Engine/CMakeLists.txt */ = {isa = PBXBuildFile; fileRef = 06412CFB9D474534BA78F8E6 /* /Users/ray/Desktop/OpenGL 3D Engine/OpenGL 3D Engine/CMakeLists.txt */; };
+		3535D514D50944CF9ACAA0C5 /* /Users/ray/Desktop/OpenGL 3D Engine/OpenGL 3D Engine/External/glad/src/glad.c */ = {isa = PBXBuildFile; fileRef = B667FDF74D9E4CBAA6ABB0B7 /* /Users/ray/Desktop/OpenGL 3D Engine/OpenGL 3D Engine/External/glad/src/glad.c */; };
+		C5ED29770F96418CB6B86E86 /* /Users/ray/Desktop/OpenGL 3D Engine/OpenGL 3D Engine/CMakeLists.txt */ = {isa = PBXBuildFile; fileRef = 458FE677AB2C45B1BAE35620 /* /Users/ray/Desktop/OpenGL 3D Engine/OpenGL 3D Engine/CMakeLists.txt */; };
+		C8248DFCE56445E08FFCB3C9 /* /Users/ray/Desktop/OpenGL 3D Engine/OpenGL 3D Engine/main.cpp */ = {isa = PBXBuildFile; fileRef = EF92D3010913496CB6AA2C12 /* /Users/ray/Desktop/OpenGL 3D Engine/OpenGL 3D Engine/main.cpp */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXBuildStyle section */
-		059070912A28478DB057C7A6 /* MinSizeRel */ = {
-			isa = PBXBuildStyle;
-			buildSettings = {
-				COPY_PHASE_STRIP = NO;
-			};
-			name = MinSizeRel;
-		};
-		4EC63ABC42C04A6B9840EC7B /* Debug */ = {
+		1B0E4A4EC3EB484F90894CD3 /* Debug */ = {
 			isa = PBXBuildStyle;
 			buildSettings = {
 				COPY_PHASE_STRIP = NO;
 			};
 			name = Debug;
 		};
-		E259629F953049048BFADD6A /* Release */ = {
-			isa = PBXBuildStyle;
-			buildSettings = {
-				COPY_PHASE_STRIP = NO;
-			};
-			name = Release;
-		};
-		E448AD358C074E45BD8903B2 /* RelWithDebInfo */ = {
+		54EE4757EC2A47D1A60FBF37 /* RelWithDebInfo */ = {
 			isa = PBXBuildStyle;
 			buildSettings = {
 				COPY_PHASE_STRIP = NO;
 			};
 			name = RelWithDebInfo;
 		};
+		B17A68848151475A9FE1BA8D /* MinSizeRel */ = {
+			isa = PBXBuildStyle;
+			buildSettings = {
+				COPY_PHASE_STRIP = NO;
+			};
+			name = MinSizeRel;
+		};
+		DC2F7A59A00E439A8B10D07F /* Release */ = {
+			isa = PBXBuildStyle;
+			buildSettings = {
+				COPY_PHASE_STRIP = NO;
+			};
+			name = Release;
+		};
 /* End PBXBuildStyle section */
 
 /* Begin PBXContainerItemProxy section */
-		4614353B6DBB4DA5B72E96A8 /* PBXContainerItemProxy */ = {
+		0C8C3C6589CA44E4A419D087 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
-			containerPortal = 602795F16CCE42B7899FB114 /* Project object */;
+			containerPortal = 587AAFBF0E5945CBA4CFEC83 /* Project object */;
 			proxyType = 1;
 			remoteGlobalIDString = 6A438E0777F0CE3D1A7CFCFF;
 			remoteInfo = ZERO_CHECK;
 		};
-		6BBC6B0C7C07482D86CDFB05 /* PBXContainerItemProxy */ = {
+		10F3ADEF4BC84488BFE122F9 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
-			containerPortal = 602795F16CCE42B7899FB114 /* Project object */;
+			containerPortal = 587AAFBF0E5945CBA4CFEC83 /* Project object */;
 			proxyType = 1;
 			remoteGlobalIDString = 6A438E0777F0CE3D1A7CFCFF;
 			remoteInfo = ZERO_CHECK;
 		};
-		6F216B6BAC2A48C980C27A05 /* PBXContainerItemProxy */ = {
+		5058CDED1C0748D8A8F8B537 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
-			containerPortal = 602795F16CCE42B7899FB114 /* Project object */;
+			containerPortal = 587AAFBF0E5945CBA4CFEC83 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 6A438E0777F0CE3D1A7CFCFF;
+			remoteInfo = ZERO_CHECK;
+		};
+		73C4516B94B742529A087F5F /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 587AAFBF0E5945CBA4CFEC83 /* Project object */;
 			proxyType = 1;
 			remoteGlobalIDString = 4D848F44F0066ABB0CB40A2E;
 			remoteInfo = copy_assets;
 		};
-		73B2D58C78F5435DAC0C533A /* PBXContainerItemProxy */ = {
+		C08688D3113B428DBA553650 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
-			containerPortal = 602795F16CCE42B7899FB114 /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = 6A438E0777F0CE3D1A7CFCFF;
-			remoteInfo = ZERO_CHECK;
-		};
-		D12458F26A294FC78D3AAB66 /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = 602795F16CCE42B7899FB114 /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = 4D848F44F0066ABB0CB40A2E;
-			remoteInfo = copy_assets;
-		};
-		F00138A5BD184CD0ACDB177C /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = 602795F16CCE42B7899FB114 /* Project object */;
+			containerPortal = 587AAFBF0E5945CBA4CFEC83 /* Project object */;
 			proxyType = 1;
 			remoteGlobalIDString = E6C505C32DA4E857D176FC49;
 			remoteInfo = OpenGL_3D_Engine;
 		};
+		EF376DC20F7A493CB4A7E4DF /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 587AAFBF0E5945CBA4CFEC83 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 4D848F44F0066ABB0CB40A2E;
+			remoteInfo = copy_assets;
+		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
-		06412CFB9D474534BA78F8E6 /* /Users/ray/Desktop/OpenGL 3D Engine/OpenGL 3D Engine/CMakeLists.txt */ = {isa = PBXFileReference; explicitFileType = sourcecode.text; fileEncoding = 4; name = CMakeLists.txt; path = CMakeLists.txt; sourceTree = SOURCE_ROOT; };
-		386A3ED7D6A84D5D82AD9D70 /* /Users/ray/Desktop/OpenGL 3D Engine/OpenGL 3D Engine/main.cpp */ = {isa = PBXFileReference; explicitFileType = sourcecode.cpp.cpp; fileEncoding = 4; name = main.cpp; path = main.cpp; sourceTree = SOURCE_ROOT; };
-		4052C9AE1B4D43F29E03AD06 /* /Users/ray/Desktop/OpenGL 3D Engine/OpenGL 3D Engine/CMakeLists.txt */ = {isa = PBXFileReference; explicitFileType = sourcecode.text; fileEncoding = 4; name = CMakeLists.txt; path = CMakeLists.txt; sourceTree = SOURCE_ROOT; };
-		4E26941702364FFEB0EE46FC /* /Users/ray/Desktop/OpenGL 3D Engine/OpenGL 3D Engine/CMakeLists.txt */ = {isa = PBXFileReference; explicitFileType = sourcecode.text; fileEncoding = 4; name = CMakeLists.txt; path = CMakeLists.txt; sourceTree = SOURCE_ROOT; };
-		7FEE91CD808B48ACA70DEBF2 /* /Users/ray/Desktop/OpenGL 3D Engine/OpenGL 3D Engine/External/glad/src/glad.c */ = {isa = PBXFileReference; explicitFileType = sourcecode.c.c; fileEncoding = 4; name = glad.c; path = External/glad/src/glad.c; sourceTree = SOURCE_ROOT; };
-		D04FA35D8A234D00A406D1E5 /* OpenGL_3D_Engine */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; path = OpenGL_3D_Engine; sourceTree = BUILT_PRODUCTS_DIR; };
+		139ADE69258A42E7A93475F4 /* /Users/ray/Desktop/OpenGL 3D Engine/OpenGL 3D Engine/CMakeLists.txt */ = {isa = PBXFileReference; explicitFileType = sourcecode.text; fileEncoding = 4; name = CMakeLists.txt; path = CMakeLists.txt; sourceTree = SOURCE_ROOT; };
+		458FE677AB2C45B1BAE35620 /* /Users/ray/Desktop/OpenGL 3D Engine/OpenGL 3D Engine/CMakeLists.txt */ = {isa = PBXFileReference; explicitFileType = sourcecode.text; fileEncoding = 4; name = CMakeLists.txt; path = CMakeLists.txt; sourceTree = SOURCE_ROOT; };
+		93E6925CA5EE4092A7EE596A /* OpenGL_3D_Engine */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; path = OpenGL_3D_Engine; sourceTree = BUILT_PRODUCTS_DIR; };
+		AB50432F18E749AA8F45B62D /* /Users/ray/Desktop/OpenGL 3D Engine/OpenGL 3D Engine/CMakeLists.txt */ = {isa = PBXFileReference; explicitFileType = sourcecode.text; fileEncoding = 4; name = CMakeLists.txt; path = CMakeLists.txt; sourceTree = SOURCE_ROOT; };
+		B667FDF74D9E4CBAA6ABB0B7 /* /Users/ray/Desktop/OpenGL 3D Engine/OpenGL 3D Engine/External/glad/src/glad.c */ = {isa = PBXFileReference; explicitFileType = sourcecode.c.c; fileEncoding = 4; name = glad.c; path = External/glad/src/glad.c; sourceTree = SOURCE_ROOT; };
+		EF92D3010913496CB6AA2C12 /* /Users/ray/Desktop/OpenGL 3D Engine/OpenGL 3D Engine/main.cpp */ = {isa = PBXFileReference; explicitFileType = sourcecode.cpp.cpp; fileEncoding = 4; name = main.cpp; path = main.cpp; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
-		F176B5A2E3EE4C42A6CC9ABB /* Frameworks */ = {
+		8D028207FCBC4BD085B855BB /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -148,88 +148,88 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
-		42A42FEBFD4F41289FE24E34 /* Source Files */ = {
+		0B90306A2E3243EF85746DE5 /* CMake Rules */ = {
 			isa = PBXGroup;
 			children = (
-				7FEE91CD808B48ACA70DEBF2 /* /Users/ray/Desktop/OpenGL 3D Engine/OpenGL 3D Engine/External/glad/src/glad.c */,
-				386A3ED7D6A84D5D82AD9D70 /* /Users/ray/Desktop/OpenGL 3D Engine/OpenGL 3D Engine/main.cpp */,
+			);
+			name = "CMake Rules";
+			sourceTree = "<group>";
+		};
+		3962ADD9764248C682CC67B1 /* copy_assets */ = {
+			isa = PBXGroup;
+			children = (
+				0B90306A2E3243EF85746DE5 /* CMake Rules */,
+				AB50432F18E749AA8F45B62D /* /Users/ray/Desktop/OpenGL 3D Engine/OpenGL 3D Engine/CMakeLists.txt */,
+			);
+			name = copy_assets;
+			sourceTree = "<group>";
+		};
+		3DDBEA89C77E40FEAE41C6DB /* Source Files */ = {
+			isa = PBXGroup;
+			children = (
+				B667FDF74D9E4CBAA6ABB0B7 /* /Users/ray/Desktop/OpenGL 3D Engine/OpenGL 3D Engine/External/glad/src/glad.c */,
+				EF92D3010913496CB6AA2C12 /* /Users/ray/Desktop/OpenGL 3D Engine/OpenGL 3D Engine/main.cpp */,
 			);
 			name = "Source Files";
 			sourceTree = "<group>";
 		};
-		4574A436FD704B04A58C60D8 = {
+		4AB5DB986B25484C95EF42AC /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				F6157A58647540EEABFE9CD4 /* OpenGL_3D_Engine */,
-				F75E760AE6BD4B7F9F734EE0 /* copy_assets */,
-				BA07D11728324C51965FD917 /* ALL_BUILD */,
-				BC095F1C2E5D46F780D057BA /* Products */,
-				8CC1EAAE1D7A4DCA99E76A91 /* Frameworks */,
-				F7C813990AF9474DB2325BF5 /* Resources */,
+				93E6925CA5EE4092A7EE596A /* OpenGL_3D_Engine */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		65E5715C57324E90A66FDC45 = {
+			isa = PBXGroup;
+			children = (
+				98DFD224A29C4DBB8FB4B695 /* OpenGL_3D_Engine */,
+				3962ADD9764248C682CC67B1 /* copy_assets */,
+				E6AF6F1D7C04460399673934 /* ALL_BUILD */,
+				4AB5DB986B25484C95EF42AC /* Products */,
+				B309D62E297241DFBBA830E1 /* Frameworks */,
+				B892600A97B24B97A591E941 /* Resources */,
 			);
 			sourceTree = "<group>";
 		};
-		8CC1EAAE1D7A4DCA99E76A91 /* Frameworks */ = {
+		98DFD224A29C4DBB8FB4B695 /* OpenGL_3D_Engine */ = {
+			isa = PBXGroup;
+			children = (
+				3DDBEA89C77E40FEAE41C6DB /* Source Files */,
+				458FE677AB2C45B1BAE35620 /* /Users/ray/Desktop/OpenGL 3D Engine/OpenGL 3D Engine/CMakeLists.txt */,
+			);
+			name = OpenGL_3D_Engine;
+			sourceTree = "<group>";
+		};
+		B309D62E297241DFBBA830E1 /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
 			);
 			name = Frameworks;
 			sourceTree = "<group>";
 		};
-		BA07D11728324C51965FD917 /* ALL_BUILD */ = {
-			isa = PBXGroup;
-			children = (
-				C262C1ECFE784471A2339A97 /* CMake Rules */,
-				4052C9AE1B4D43F29E03AD06 /* /Users/ray/Desktop/OpenGL 3D Engine/OpenGL 3D Engine/CMakeLists.txt */,
-			);
-			name = ALL_BUILD;
-			sourceTree = "<group>";
-		};
-		BC095F1C2E5D46F780D057BA /* Products */ = {
-			isa = PBXGroup;
-			children = (
-				D04FA35D8A234D00A406D1E5 /* OpenGL_3D_Engine */,
-			);
-			name = Products;
-			sourceTree = "<group>";
-		};
-		C262C1ECFE784471A2339A97 /* CMake Rules */ = {
-			isa = PBXGroup;
-			children = (
-			);
-			name = "CMake Rules";
-			sourceTree = "<group>";
-		};
-		EF6CACD99B1D4CD6ADCA1EF8 /* CMake Rules */ = {
-			isa = PBXGroup;
-			children = (
-			);
-			name = "CMake Rules";
-			sourceTree = "<group>";
-		};
-		F6157A58647540EEABFE9CD4 /* OpenGL_3D_Engine */ = {
-			isa = PBXGroup;
-			children = (
-				42A42FEBFD4F41289FE24E34 /* Source Files */,
-				06412CFB9D474534BA78F8E6 /* /Users/ray/Desktop/OpenGL 3D Engine/OpenGL 3D Engine/CMakeLists.txt */,
-			);
-			name = OpenGL_3D_Engine;
-			sourceTree = "<group>";
-		};
-		F75E760AE6BD4B7F9F734EE0 /* copy_assets */ = {
-			isa = PBXGroup;
-			children = (
-				EF6CACD99B1D4CD6ADCA1EF8 /* CMake Rules */,
-				4E26941702364FFEB0EE46FC /* /Users/ray/Desktop/OpenGL 3D Engine/OpenGL 3D Engine/CMakeLists.txt */,
-			);
-			name = copy_assets;
-			sourceTree = "<group>";
-		};
-		F7C813990AF9474DB2325BF5 /* Resources */ = {
+		B892600A97B24B97A591E941 /* Resources */ = {
 			isa = PBXGroup;
 			children = (
 			);
 			name = Resources;
+			sourceTree = "<group>";
+		};
+		D7A3A33105E8498DB06A341A /* CMake Rules */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			name = "CMake Rules";
+			sourceTree = "<group>";
+		};
+		E6AF6F1D7C04460399673934 /* ALL_BUILD */ = {
+			isa = PBXGroup;
+			children = (
+				D7A3A33105E8498DB06A341A /* CMake Rules */,
+				139ADE69258A42E7A93475F4 /* /Users/ray/Desktop/OpenGL 3D Engine/OpenGL 3D Engine/CMakeLists.txt */,
+			);
+			name = ALL_BUILD;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -237,43 +237,43 @@
 /* Begin PBXNativeTarget section */
 		E6C505C32DA4E857D176FC49 /* OpenGL_3D_Engine */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 534AE714808540EE958FD9FD /* Build configuration list for PBXNativeTarget "OpenGL_3D_Engine" */;
+			buildConfigurationList = 01596E8976CF40199B6D9142 /* Build configuration list for PBXNativeTarget "OpenGL_3D_Engine" */;
 			buildPhases = (
-				AC75853A68C1464D86CF3B59 /* Sources */,
-				F176B5A2E3EE4C42A6CC9ABB /* Frameworks */,
+				08B16DCB725042BDB0B52235 /* Sources */,
+				8D028207FCBC4BD085B855BB /* Frameworks */,
 			);
 			buildRules = (
 			);
 			dependencies = (
-				A2A5BF14EAFD4E20B807BB1B /* PBXTargetDependency */,
-				C06171679DD64E6A98DF64A7 /* PBXTargetDependency */,
+				DCCA1700B5D545839F9C65B5 /* PBXTargetDependency */,
+				8E8C3389BFD94172BF6C96F7 /* PBXTargetDependency */,
 			);
 			name = OpenGL_3D_Engine;
 			productName = OpenGL_3D_Engine;
-			productReference = D04FA35D8A234D00A406D1E5 /* OpenGL_3D_Engine */;
+			productReference = 93E6925CA5EE4092A7EE596A /* OpenGL_3D_Engine */;
 			productType = "com.apple.product-type.tool";
 		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
-		602795F16CCE42B7899FB114 /* Project object */ = {
+		587AAFBF0E5945CBA4CFEC83 /* Project object */ = {
 			isa = PBXProject;
 			attributes = {
 				BuildIndependentTargetsInParallel = YES;
 				LastUpgradeCheck = 2600;
 			};
-			buildConfigurationList = 4292EDD707854705A4909A00 /* Build configuration list for PBXProject "OpenGL_3D_Engine" */;
+			buildConfigurationList = 0F60370F06244A95B6249636 /* Build configuration list for PBXProject "OpenGL_3D_Engine" */;
 			buildSettings = {
 			};
 			buildStyles = (
-				4EC63ABC42C04A6B9840EC7B /* Debug */,
-				E259629F953049048BFADD6A /* Release */,
-				059070912A28478DB057C7A6 /* MinSizeRel */,
-				E448AD358C074E45BD8903B2 /* RelWithDebInfo */,
+				1B0E4A4EC3EB484F90894CD3 /* Debug */,
+				DC2F7A59A00E439A8B10D07F /* Release */,
+				B17A68848151475A9FE1BA8D /* MinSizeRel */,
+				54EE4757EC2A47D1A60FBF37 /* RelWithDebInfo */,
 			);
 			compatibilityVersion = "Xcode 3.2";
 			hasScannedForEncodings = 0;
-			mainGroup = 4574A436FD704B04A58C60D8;
+			mainGroup = 65E5715C57324E90A66FDC45;
 			projectDirPath = "/Users/ray/Desktop/OpenGL 3D Engine/OpenGL 3D Engine";
 			projectRoot = "";
 			targets = (
@@ -335,22 +335,22 @@ fi
 			shellScript = "set -e
 if test \"$CONFIGURATION\" = \"Debug\"; then :
   cd \"/Users/ray/Desktop/OpenGL 3D Engine/OpenGL 3D Engine/build\"
-  /opt/homebrew/bin/cmake -E copy_directory /Users/ray/Desktop/OpenGL\\ 3D\\ Engine/OpenGL\\ 3D\\ Engine/OBJ_models /Users/ray/Desktop/OpenGL\\ 3D\\ Engine/OpenGL\\ 3D\\ Engine/build/OBJ_models
+  /opt/homebrew/bin/cmake -E copy_directory /Users/ray/Desktop/OpenGL\\ 3D\\ Engine/OpenGL\\ 3D\\ Engine/OBJ_Models /Users/ray/Desktop/OpenGL\\ 3D\\ Engine/OpenGL\\ 3D\\ Engine/build/OBJ_Models
   /opt/homebrew/bin/cmake -E copy_directory /Users/ray/Desktop/OpenGL\\ 3D\\ Engine/OpenGL\\ 3D\\ Engine/Skyboxes /Users/ray/Desktop/OpenGL\\ 3D\\ Engine/OpenGL\\ 3D\\ Engine/build/Skyboxes
 fi
 if test \"$CONFIGURATION\" = \"Release\"; then :
   cd \"/Users/ray/Desktop/OpenGL 3D Engine/OpenGL 3D Engine/build\"
-  /opt/homebrew/bin/cmake -E copy_directory /Users/ray/Desktop/OpenGL\\ 3D\\ Engine/OpenGL\\ 3D\\ Engine/OBJ_models /Users/ray/Desktop/OpenGL\\ 3D\\ Engine/OpenGL\\ 3D\\ Engine/build/OBJ_models
+  /opt/homebrew/bin/cmake -E copy_directory /Users/ray/Desktop/OpenGL\\ 3D\\ Engine/OpenGL\\ 3D\\ Engine/OBJ_Models /Users/ray/Desktop/OpenGL\\ 3D\\ Engine/OpenGL\\ 3D\\ Engine/build/OBJ_Models
   /opt/homebrew/bin/cmake -E copy_directory /Users/ray/Desktop/OpenGL\\ 3D\\ Engine/OpenGL\\ 3D\\ Engine/Skyboxes /Users/ray/Desktop/OpenGL\\ 3D\\ Engine/OpenGL\\ 3D\\ Engine/build/Skyboxes
 fi
 if test \"$CONFIGURATION\" = \"MinSizeRel\"; then :
   cd \"/Users/ray/Desktop/OpenGL 3D Engine/OpenGL 3D Engine/build\"
-  /opt/homebrew/bin/cmake -E copy_directory /Users/ray/Desktop/OpenGL\\ 3D\\ Engine/OpenGL\\ 3D\\ Engine/OBJ_models /Users/ray/Desktop/OpenGL\\ 3D\\ Engine/OpenGL\\ 3D\\ Engine/build/OBJ_models
+  /opt/homebrew/bin/cmake -E copy_directory /Users/ray/Desktop/OpenGL\\ 3D\\ Engine/OpenGL\\ 3D\\ Engine/OBJ_Models /Users/ray/Desktop/OpenGL\\ 3D\\ Engine/OpenGL\\ 3D\\ Engine/build/OBJ_Models
   /opt/homebrew/bin/cmake -E copy_directory /Users/ray/Desktop/OpenGL\\ 3D\\ Engine/OpenGL\\ 3D\\ Engine/Skyboxes /Users/ray/Desktop/OpenGL\\ 3D\\ Engine/OpenGL\\ 3D\\ Engine/build/Skyboxes
 fi
 if test \"$CONFIGURATION\" = \"RelWithDebInfo\"; then :
   cd \"/Users/ray/Desktop/OpenGL 3D Engine/OpenGL 3D Engine/build\"
-  /opt/homebrew/bin/cmake -E copy_directory /Users/ray/Desktop/OpenGL\\ 3D\\ Engine/OpenGL\\ 3D\\ Engine/OBJ_models /Users/ray/Desktop/OpenGL\\ 3D\\ Engine/OpenGL\\ 3D\\ Engine/build/OBJ_models
+  /opt/homebrew/bin/cmake -E copy_directory /Users/ray/Desktop/OpenGL\\ 3D\\ Engine/OpenGL\\ 3D\\ Engine/OBJ_Models /Users/ray/Desktop/OpenGL\\ 3D\\ Engine/OpenGL\\ 3D\\ Engine/build/OBJ_Models
   /opt/homebrew/bin/cmake -E copy_directory /Users/ray/Desktop/OpenGL\\ 3D\\ Engine/OpenGL\\ 3D\\ Engine/Skyboxes /Users/ray/Desktop/OpenGL\\ 3D\\ Engine/OpenGL\\ 3D\\ Engine/build/Skyboxes
 fi
 ";
@@ -437,348 +437,52 @@ exit 0";
 /* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
-		AC75853A68C1464D86CF3B59 /* Sources */ = {
+		08B16DCB725042BDB0B52235 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				58A8B79A8C3E47CDB6B544AB /* /Users/ray/Desktop/OpenGL 3D Engine/OpenGL 3D Engine/External/glad/src/glad.c */,
-				626E71E567E5405D8E5B8BE4 /* /Users/ray/Desktop/OpenGL 3D Engine/OpenGL 3D Engine/main.cpp */,
+				3535D514D50944CF9ACAA0C5 /* /Users/ray/Desktop/OpenGL 3D Engine/OpenGL 3D Engine/External/glad/src/glad.c */,
+				C8248DFCE56445E08FFCB3C9 /* /Users/ray/Desktop/OpenGL 3D Engine/OpenGL 3D Engine/main.cpp */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
-		0086FE3A773545F69EB591A0 /* PBXTargetDependency */ = {
-			isa = PBXTargetDependency;
-			target = 6A438E0777F0CE3D1A7CFCFF /* ZERO_CHECK */;
-			targetProxy = 6BBC6B0C7C07482D86CDFB05 /* PBXContainerItemProxy */;
-		};
-		49942385428041E09E11304E /* PBXTargetDependency */ = {
+		04B361D56A134AC0989DE73F /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = E6C505C32DA4E857D176FC49 /* OpenGL_3D_Engine */;
-			targetProxy = F00138A5BD184CD0ACDB177C /* PBXContainerItemProxy */;
+			targetProxy = C08688D3113B428DBA553650 /* PBXContainerItemProxy */;
 		};
-		550FC1CE98424943A3C2F768 /* PBXTargetDependency */ = {
-			isa = PBXTargetDependency;
-			target = 6A438E0777F0CE3D1A7CFCFF /* ZERO_CHECK */;
-			targetProxy = 4614353B6DBB4DA5B72E96A8 /* PBXContainerItemProxy */;
-		};
-		7B9142772AF147D8AB01FB2D /* PBXTargetDependency */ = {
+		2E8A886713904301B22F7A21 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = 4D848F44F0066ABB0CB40A2E /* copy_assets */;
-			targetProxy = 6F216B6BAC2A48C980C27A05 /* PBXContainerItemProxy */;
+			targetProxy = 73C4516B94B742529A087F5F /* PBXContainerItemProxy */;
 		};
-		A2A5BF14EAFD4E20B807BB1B /* PBXTargetDependency */ = {
+		45BEB2BADDDD47FD8E33B836 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = 6A438E0777F0CE3D1A7CFCFF /* ZERO_CHECK */;
-			targetProxy = 73B2D58C78F5435DAC0C533A /* PBXContainerItemProxy */;
+			targetProxy = 10F3ADEF4BC84488BFE122F9 /* PBXContainerItemProxy */;
 		};
-		C06171679DD64E6A98DF64A7 /* PBXTargetDependency */ = {
+		7A720AC4478F47429B8CA57B /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 6A438E0777F0CE3D1A7CFCFF /* ZERO_CHECK */;
+			targetProxy = 5058CDED1C0748D8A8F8B537 /* PBXContainerItemProxy */;
+		};
+		8E8C3389BFD94172BF6C96F7 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = 4D848F44F0066ABB0CB40A2E /* copy_assets */;
-			targetProxy = D12458F26A294FC78D3AAB66 /* PBXContainerItemProxy */;
+			targetProxy = EF376DC20F7A493CB4A7E4DF /* PBXContainerItemProxy */;
+		};
+		DCCA1700B5D545839F9C65B5 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 6A438E0777F0CE3D1A7CFCFF /* ZERO_CHECK */;
+			targetProxy = 0C8C3C6589CA44E4A419D087 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
-		130CB724FD044479A46F7842 /* Debug */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				ALWAYS_SEARCH_USER_PATHS = NO;
-				ARCHS = arm64;
-				COMBINE_HIDPI_IMAGES = YES;
-				GCC_GENERATE_DEBUGGING_SYMBOLS = YES;
-				GCC_INLINES_ARE_PRIVATE_EXTERN = NO;
-				GCC_OPTIMIZATION_LEVEL = 0;
-				GCC_PREPROCESSOR_DEFINITIONS = ("'CMAKE_INTDIR=\"$(CONFIGURATION)$(EFFECTIVE_PLATFORM_NAME)\"'","$(inherited)");
-				GCC_SYMBOLS_PRIVATE_EXTERN = NO;
-				INSTALL_PATH = "";
-				ONLY_ACTIVE_ARCH = NO;
-				OTHER_LDFLAGS = ("","$(inherited)");
-				OTHER_REZFLAGS = "";
-				PRODUCT_NAME = ZERO_CHECK;
-				SECTORDER_FLAGS = "";
-				USE_HEADERMAP = NO;
-				WARNING_CFLAGS = ("$(inherited)");
-			};
-			name = Debug;
-		};
-		194DCBA3B7BC4CAF92AC2978 /* RelWithDebInfo */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				ALWAYS_SEARCH_USER_PATHS = NO;
-				ARCHS = arm64;
-				COMBINE_HIDPI_IMAGES = YES;
-				GCC_GENERATE_DEBUGGING_SYMBOLS = YES;
-				GCC_INLINES_ARE_PRIVATE_EXTERN = NO;
-				GCC_OPTIMIZATION_LEVEL = 0;
-				GCC_PREPROCESSOR_DEFINITIONS = ("'CMAKE_INTDIR=\"$(CONFIGURATION)$(EFFECTIVE_PLATFORM_NAME)\"'","$(inherited)");
-				GCC_SYMBOLS_PRIVATE_EXTERN = NO;
-				INSTALL_PATH = "";
-				ONLY_ACTIVE_ARCH = NO;
-				OTHER_LDFLAGS = ("","$(inherited)");
-				OTHER_REZFLAGS = "";
-				PRODUCT_NAME = ALL_BUILD;
-				SECTORDER_FLAGS = "";
-				USE_HEADERMAP = NO;
-				WARNING_CFLAGS = ("$(inherited)");
-			};
-			name = RelWithDebInfo;
-		};
-		1A601051BC9640119E391810 /* RelWithDebInfo */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				ALWAYS_SEARCH_USER_PATHS = NO;
-				ARCHS = arm64;
-				COMBINE_HIDPI_IMAGES = YES;
-				CONFIGURATION_BUILD_DIR = "/Users/ray/Desktop/OpenGL 3D Engine/OpenGL 3D Engine/build/RelWithDebInfo";
-				EXECUTABLE_PREFIX = "";
-				EXECUTABLE_SUFFIX = "";
-				GCC_GENERATE_DEBUGGING_SYMBOLS = YES;
-				GCC_INLINES_ARE_PRIVATE_EXTERN = NO;
-				GCC_OPTIMIZATION_LEVEL = 2;
-				GCC_PREPROCESSOR_DEFINITIONS = ("'CMAKE_INTDIR=\"$(CONFIGURATION)$(EFFECTIVE_PLATFORM_NAME)\"'",GL_SILENCE_DEPRECATION,GLFW_INCLUDE_NONE,"$(inherited)");
-				GCC_SYMBOLS_PRIVATE_EXTERN = NO;
-				HEADER_SEARCH_PATHS = ("\"/Users/ray/Desktop/OpenGL 3D Engine/OpenGL 3D Engine/External/glad/include\"","\"/Users/ray/Desktop/OpenGL 3D Engine/OpenGL 3D Engine/External/glfw/include\"","\"/Users/ray/Desktop/OpenGL 3D Engine/OpenGL 3D Engine/External/glm\"","\"/Users/ray/Desktop/OpenGL 3D Engine/OpenGL 3D Engine/External/stb\"","$(inherited)");
-				INSTALL_PATH = "";
-				ONLY_ACTIVE_ARCH = NO;
-				OTHER_CFLAGS = ("       -DNDEBUG ","$(inherited)");
-				OTHER_CPLUSPLUSFLAGS = " -Wno-deprecated-declarations        -DNDEBUG '-std=gnu++17' ";
-				OTHER_LDFLAGS = (" -Wl,-search_paths_first -Wl,-headerpad_max_install_names","\"/Users/ray/Desktop/OpenGL 3D Engine/OpenGL 3D Engine/External/glfw/libglfw3.a\"","-framework Cocoa","-framework IOKit","-framework CoreVideo","-framework Metal","-framework CoreFoundation","-framework CoreGraphics","$(inherited)");
-				OTHER_REZFLAGS = "";
-				PRODUCT_NAME = OpenGL_3D_Engine;
-				SECTORDER_FLAGS = "";
-				TARGET_TEMP_DIR = "/Users/ray/Desktop/OpenGL 3D Engine/OpenGL 3D Engine/build/build/OpenGL_3D_Engine.build/$(CONFIGURATION)$(EFFECTIVE_PLATFORM_NAME)";
-				USE_HEADERMAP = NO;
-				WARNING_CFLAGS = ("$(inherited)");
-			};
-			name = RelWithDebInfo;
-		};
-		241DEACBE2B34A06A2EBE1B5 /* Debug */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				ALWAYS_SEARCH_USER_PATHS = NO;
-				ARCHS = arm64;
-				COMBINE_HIDPI_IMAGES = YES;
-				GCC_GENERATE_DEBUGGING_SYMBOLS = YES;
-				GCC_INLINES_ARE_PRIVATE_EXTERN = NO;
-				GCC_OPTIMIZATION_LEVEL = 0;
-				GCC_PREPROCESSOR_DEFINITIONS = ("'CMAKE_INTDIR=\"$(CONFIGURATION)$(EFFECTIVE_PLATFORM_NAME)\"'","$(inherited)");
-				GCC_SYMBOLS_PRIVATE_EXTERN = NO;
-				INSTALL_PATH = "";
-				ONLY_ACTIVE_ARCH = NO;
-				OTHER_LDFLAGS = ("","$(inherited)");
-				OTHER_REZFLAGS = "";
-				PRODUCT_NAME = copy_assets;
-				SECTORDER_FLAGS = "";
-				USE_HEADERMAP = NO;
-				WARNING_CFLAGS = ("$(inherited)");
-			};
-			name = Debug;
-		};
-		2F989CBEA733408CAA2D613B /* Release */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				ARCHS = arm64;
-				MACOSX_DEPLOYMENT_TARGET = 15.0;
-				SDKROOT = "";
-				SWIFT_COMPILATION_MODE = wholemodule;
-				SYMROOT = "/Users/ray/Desktop/OpenGL 3D Engine/OpenGL 3D Engine/build/build";
-			};
-			name = Release;
-		};
-		3E05F2EE9EDF4B7B89794E86 /* MinSizeRel */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				ALWAYS_SEARCH_USER_PATHS = NO;
-				ARCHS = arm64;
-				COMBINE_HIDPI_IMAGES = YES;
-				GCC_GENERATE_DEBUGGING_SYMBOLS = YES;
-				GCC_INLINES_ARE_PRIVATE_EXTERN = NO;
-				GCC_OPTIMIZATION_LEVEL = 0;
-				GCC_PREPROCESSOR_DEFINITIONS = ("'CMAKE_INTDIR=\"$(CONFIGURATION)$(EFFECTIVE_PLATFORM_NAME)\"'","$(inherited)");
-				GCC_SYMBOLS_PRIVATE_EXTERN = NO;
-				INSTALL_PATH = "";
-				ONLY_ACTIVE_ARCH = NO;
-				OTHER_LDFLAGS = ("","$(inherited)");
-				OTHER_REZFLAGS = "";
-				PRODUCT_NAME = copy_assets;
-				SECTORDER_FLAGS = "";
-				USE_HEADERMAP = NO;
-				WARNING_CFLAGS = ("$(inherited)");
-			};
-			name = MinSizeRel;
-		};
-		683E3431E9D441429A3AB0EF /* RelWithDebInfo */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				ARCHS = arm64;
-				MACOSX_DEPLOYMENT_TARGET = 15.0;
-				SDKROOT = "";
-				SWIFT_COMPILATION_MODE = wholemodule;
-				SYMROOT = "/Users/ray/Desktop/OpenGL 3D Engine/OpenGL 3D Engine/build/build";
-			};
-			name = RelWithDebInfo;
-		};
-		7538396151724695A9FEF032 /* Debug */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				ALWAYS_SEARCH_USER_PATHS = NO;
-				ARCHS = arm64;
-				COMBINE_HIDPI_IMAGES = YES;
-				CONFIGURATION_BUILD_DIR = "/Users/ray/Desktop/OpenGL 3D Engine/OpenGL 3D Engine/build/Debug";
-				EXECUTABLE_PREFIX = "";
-				EXECUTABLE_SUFFIX = "";
-				GCC_GENERATE_DEBUGGING_SYMBOLS = YES;
-				GCC_INLINES_ARE_PRIVATE_EXTERN = NO;
-				GCC_OPTIMIZATION_LEVEL = 0;
-				GCC_PREPROCESSOR_DEFINITIONS = ("'CMAKE_INTDIR=\"$(CONFIGURATION)$(EFFECTIVE_PLATFORM_NAME)\"'",GL_SILENCE_DEPRECATION,GLFW_INCLUDE_NONE,"$(inherited)");
-				GCC_SYMBOLS_PRIVATE_EXTERN = NO;
-				HEADER_SEARCH_PATHS = ("\"/Users/ray/Desktop/OpenGL 3D Engine/OpenGL 3D Engine/External/glad/include\"","\"/Users/ray/Desktop/OpenGL 3D Engine/OpenGL 3D Engine/External/glfw/include\"","\"/Users/ray/Desktop/OpenGL 3D Engine/OpenGL 3D Engine/External/glm\"","\"/Users/ray/Desktop/OpenGL 3D Engine/OpenGL 3D Engine/External/stb\"","$(inherited)");
-				INSTALL_PATH = "";
-				ONLY_ACTIVE_ARCH = NO;
-				OTHER_CFLAGS = ("   ","$(inherited)");
-				OTHER_CPLUSPLUSFLAGS = " -Wno-deprecated-declarations        -Wall -Wextra '-std=gnu++17' ";
-				OTHER_LDFLAGS = (" -Wl,-search_paths_first -Wl,-headerpad_max_install_names","\"/Users/ray/Desktop/OpenGL 3D Engine/OpenGL 3D Engine/External/glfw/libglfw3.a\"","-framework Cocoa","-framework IOKit","-framework CoreVideo","-framework Metal","-framework CoreFoundation","-framework CoreGraphics","$(inherited)");
-				OTHER_REZFLAGS = "";
-				PRODUCT_NAME = OpenGL_3D_Engine;
-				SECTORDER_FLAGS = "";
-				TARGET_TEMP_DIR = "/Users/ray/Desktop/OpenGL 3D Engine/OpenGL 3D Engine/build/build/OpenGL_3D_Engine.build/$(CONFIGURATION)$(EFFECTIVE_PLATFORM_NAME)";
-				USE_HEADERMAP = NO;
-				WARNING_CFLAGS = ("$(inherited)");
-			};
-			name = Debug;
-		};
-		7CB4C2D6129042DB9C8DC125 /* Release */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				ALWAYS_SEARCH_USER_PATHS = NO;
-				ARCHS = arm64;
-				COMBINE_HIDPI_IMAGES = YES;
-				GCC_GENERATE_DEBUGGING_SYMBOLS = YES;
-				GCC_INLINES_ARE_PRIVATE_EXTERN = NO;
-				GCC_OPTIMIZATION_LEVEL = 0;
-				GCC_PREPROCESSOR_DEFINITIONS = ("'CMAKE_INTDIR=\"$(CONFIGURATION)$(EFFECTIVE_PLATFORM_NAME)\"'","$(inherited)");
-				GCC_SYMBOLS_PRIVATE_EXTERN = NO;
-				INSTALL_PATH = "";
-				ONLY_ACTIVE_ARCH = NO;
-				OTHER_LDFLAGS = ("","$(inherited)");
-				OTHER_REZFLAGS = "";
-				PRODUCT_NAME = copy_assets;
-				SECTORDER_FLAGS = "";
-				USE_HEADERMAP = NO;
-				WARNING_CFLAGS = ("$(inherited)");
-			};
-			name = Release;
-		};
-		82FF53A4590D4F52ADAB4DAD /* MinSizeRel */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				ARCHS = arm64;
-				MACOSX_DEPLOYMENT_TARGET = 15.0;
-				SDKROOT = "";
-				SWIFT_COMPILATION_MODE = wholemodule;
-				SYMROOT = "/Users/ray/Desktop/OpenGL 3D Engine/OpenGL 3D Engine/build/build";
-			};
-			name = MinSizeRel;
-		};
-		8F6F3352C5784511877B3BD4 /* MinSizeRel */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				ALWAYS_SEARCH_USER_PATHS = NO;
-				ARCHS = arm64;
-				COMBINE_HIDPI_IMAGES = YES;
-				GCC_GENERATE_DEBUGGING_SYMBOLS = YES;
-				GCC_INLINES_ARE_PRIVATE_EXTERN = NO;
-				GCC_OPTIMIZATION_LEVEL = 0;
-				GCC_PREPROCESSOR_DEFINITIONS = ("'CMAKE_INTDIR=\"$(CONFIGURATION)$(EFFECTIVE_PLATFORM_NAME)\"'","$(inherited)");
-				GCC_SYMBOLS_PRIVATE_EXTERN = NO;
-				INSTALL_PATH = "";
-				ONLY_ACTIVE_ARCH = NO;
-				OTHER_LDFLAGS = ("","$(inherited)");
-				OTHER_REZFLAGS = "";
-				PRODUCT_NAME = ZERO_CHECK;
-				SECTORDER_FLAGS = "";
-				USE_HEADERMAP = NO;
-				WARNING_CFLAGS = ("$(inherited)");
-			};
-			name = MinSizeRel;
-		};
-		A41FEE7E554D49A0B60D9F84 /* Release */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				ALWAYS_SEARCH_USER_PATHS = NO;
-				ARCHS = arm64;
-				COMBINE_HIDPI_IMAGES = YES;
-				GCC_GENERATE_DEBUGGING_SYMBOLS = YES;
-				GCC_INLINES_ARE_PRIVATE_EXTERN = NO;
-				GCC_OPTIMIZATION_LEVEL = 0;
-				GCC_PREPROCESSOR_DEFINITIONS = ("'CMAKE_INTDIR=\"$(CONFIGURATION)$(EFFECTIVE_PLATFORM_NAME)\"'","$(inherited)");
-				GCC_SYMBOLS_PRIVATE_EXTERN = NO;
-				INSTALL_PATH = "";
-				ONLY_ACTIVE_ARCH = NO;
-				OTHER_LDFLAGS = ("","$(inherited)");
-				OTHER_REZFLAGS = "";
-				PRODUCT_NAME = ALL_BUILD;
-				SECTORDER_FLAGS = "";
-				USE_HEADERMAP = NO;
-				WARNING_CFLAGS = ("$(inherited)");
-			};
-			name = Release;
-		};
-		A60CDDC3FD974C7EAE7750CA /* MinSizeRel */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				ALWAYS_SEARCH_USER_PATHS = NO;
-				ARCHS = arm64;
-				COMBINE_HIDPI_IMAGES = YES;
-				CONFIGURATION_BUILD_DIR = "/Users/ray/Desktop/OpenGL 3D Engine/OpenGL 3D Engine/build/MinSizeRel";
-				EXECUTABLE_PREFIX = "";
-				EXECUTABLE_SUFFIX = "";
-				GCC_GENERATE_DEBUGGING_SYMBOLS = NO;
-				GCC_INLINES_ARE_PRIVATE_EXTERN = NO;
-				GCC_OPTIMIZATION_LEVEL = s;
-				GCC_PREPROCESSOR_DEFINITIONS = ("'CMAKE_INTDIR=\"$(CONFIGURATION)$(EFFECTIVE_PLATFORM_NAME)\"'",GL_SILENCE_DEPRECATION,GLFW_INCLUDE_NONE,"$(inherited)");
-				GCC_SYMBOLS_PRIVATE_EXTERN = NO;
-				HEADER_SEARCH_PATHS = ("\"/Users/ray/Desktop/OpenGL 3D Engine/OpenGL 3D Engine/External/glad/include\"","\"/Users/ray/Desktop/OpenGL 3D Engine/OpenGL 3D Engine/External/glfw/include\"","\"/Users/ray/Desktop/OpenGL 3D Engine/OpenGL 3D Engine/External/glm\"","\"/Users/ray/Desktop/OpenGL 3D Engine/OpenGL 3D Engine/External/stb\"","$(inherited)");
-				INSTALL_PATH = "";
-				ONLY_ACTIVE_ARCH = NO;
-				OTHER_CFLAGS = ("    -DNDEBUG ","$(inherited)");
-				OTHER_CPLUSPLUSFLAGS = " -Wno-deprecated-declarations     -DNDEBUG '-std=gnu++17' ";
-				OTHER_LDFLAGS = (" -Wl,-search_paths_first -Wl,-headerpad_max_install_names","\"/Users/ray/Desktop/OpenGL 3D Engine/OpenGL 3D Engine/External/glfw/libglfw3.a\"","-framework Cocoa","-framework IOKit","-framework CoreVideo","-framework Metal","-framework CoreFoundation","-framework CoreGraphics","$(inherited)");
-				OTHER_REZFLAGS = "";
-				PRODUCT_NAME = OpenGL_3D_Engine;
-				SECTORDER_FLAGS = "";
-				TARGET_TEMP_DIR = "/Users/ray/Desktop/OpenGL 3D Engine/OpenGL 3D Engine/build/build/OpenGL_3D_Engine.build/$(CONFIGURATION)$(EFFECTIVE_PLATFORM_NAME)";
-				USE_HEADERMAP = NO;
-				WARNING_CFLAGS = ("$(inherited)");
-			};
-			name = MinSizeRel;
-		};
-		AD32E60F0E4046F0BC1C66EF /* RelWithDebInfo */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				ALWAYS_SEARCH_USER_PATHS = NO;
-				ARCHS = arm64;
-				COMBINE_HIDPI_IMAGES = YES;
-				GCC_GENERATE_DEBUGGING_SYMBOLS = YES;
-				GCC_INLINES_ARE_PRIVATE_EXTERN = NO;
-				GCC_OPTIMIZATION_LEVEL = 0;
-				GCC_PREPROCESSOR_DEFINITIONS = ("'CMAKE_INTDIR=\"$(CONFIGURATION)$(EFFECTIVE_PLATFORM_NAME)\"'","$(inherited)");
-				GCC_SYMBOLS_PRIVATE_EXTERN = NO;
-				INSTALL_PATH = "";
-				ONLY_ACTIVE_ARCH = NO;
-				OTHER_LDFLAGS = ("","$(inherited)");
-				OTHER_REZFLAGS = "";
-				PRODUCT_NAME = ZERO_CHECK;
-				SECTORDER_FLAGS = "";
-				USE_HEADERMAP = NO;
-				WARNING_CFLAGS = ("$(inherited)");
-			};
-			name = RelWithDebInfo;
-		};
-		CD33C7328FCB4B1EBE1324E2 /* Release */ = {
+		01BCC2B5A9514E87962F7779 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
@@ -807,29 +511,7 @@ exit 0";
 			};
 			name = Release;
 		};
-		E50BE0F06FEE41739DEBE94D /* RelWithDebInfo */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				ALWAYS_SEARCH_USER_PATHS = NO;
-				ARCHS = arm64;
-				COMBINE_HIDPI_IMAGES = YES;
-				GCC_GENERATE_DEBUGGING_SYMBOLS = YES;
-				GCC_INLINES_ARE_PRIVATE_EXTERN = NO;
-				GCC_OPTIMIZATION_LEVEL = 0;
-				GCC_PREPROCESSOR_DEFINITIONS = ("'CMAKE_INTDIR=\"$(CONFIGURATION)$(EFFECTIVE_PLATFORM_NAME)\"'","$(inherited)");
-				GCC_SYMBOLS_PRIVATE_EXTERN = NO;
-				INSTALL_PATH = "";
-				ONLY_ACTIVE_ARCH = NO;
-				OTHER_LDFLAGS = ("","$(inherited)");
-				OTHER_REZFLAGS = "";
-				PRODUCT_NAME = copy_assets;
-				SECTORDER_FLAGS = "";
-				USE_HEADERMAP = NO;
-				WARNING_CFLAGS = ("$(inherited)");
-			};
-			name = RelWithDebInfo;
-		};
-		E5BA3538A27E4DC4A1D716A1 /* Debug */ = {
+		04BD44FE47384F61AEF97E35 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ARCHS = arm64;
@@ -839,7 +521,7 @@ exit 0";
 			};
 			name = Debug;
 		};
-		EB842AC17BFB41DF88D02907 /* Debug */ = {
+		184373CBE7FC422882FDE3FC /* MinSizeRel */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
@@ -854,14 +536,14 @@ exit 0";
 				ONLY_ACTIVE_ARCH = NO;
 				OTHER_LDFLAGS = ("","$(inherited)");
 				OTHER_REZFLAGS = "";
-				PRODUCT_NAME = ALL_BUILD;
+				PRODUCT_NAME = ZERO_CHECK;
 				SECTORDER_FLAGS = "";
 				USE_HEADERMAP = NO;
 				WARNING_CFLAGS = ("$(inherited)");
 			};
-			name = Debug;
+			name = MinSizeRel;
 		};
-		EE9CBA3367B84C91B386F37F /* Release */ = {
+		1A35619627534000847758BF /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
@@ -883,7 +565,29 @@ exit 0";
 			};
 			name = Release;
 		};
-		FACEC800898A42E69B9B50F8 /* MinSizeRel */ = {
+		3F86CBA03AE44BC7AB40FED1 /* RelWithDebInfo */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ARCHS = arm64;
+				COMBINE_HIDPI_IMAGES = YES;
+				GCC_GENERATE_DEBUGGING_SYMBOLS = YES;
+				GCC_INLINES_ARE_PRIVATE_EXTERN = NO;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = ("'CMAKE_INTDIR=\"$(CONFIGURATION)$(EFFECTIVE_PLATFORM_NAME)\"'","$(inherited)");
+				GCC_SYMBOLS_PRIVATE_EXTERN = NO;
+				INSTALL_PATH = "";
+				ONLY_ACTIVE_ARCH = NO;
+				OTHER_LDFLAGS = ("","$(inherited)");
+				OTHER_REZFLAGS = "";
+				PRODUCT_NAME = copy_assets;
+				SECTORDER_FLAGS = "";
+				USE_HEADERMAP = NO;
+				WARNING_CFLAGS = ("$(inherited)");
+			};
+			name = RelWithDebInfo;
+		};
+		419AF095927647EEB93358DE /* MinSizeRel */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
@@ -905,65 +609,361 @@ exit 0";
 			};
 			name = MinSizeRel;
 		};
+		42FADAE397154FECA420B211 /* RelWithDebInfo */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ARCHS = arm64;
+				COMBINE_HIDPI_IMAGES = YES;
+				GCC_GENERATE_DEBUGGING_SYMBOLS = YES;
+				GCC_INLINES_ARE_PRIVATE_EXTERN = NO;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = ("'CMAKE_INTDIR=\"$(CONFIGURATION)$(EFFECTIVE_PLATFORM_NAME)\"'","$(inherited)");
+				GCC_SYMBOLS_PRIVATE_EXTERN = NO;
+				INSTALL_PATH = "";
+				ONLY_ACTIVE_ARCH = NO;
+				OTHER_LDFLAGS = ("","$(inherited)");
+				OTHER_REZFLAGS = "";
+				PRODUCT_NAME = ALL_BUILD;
+				SECTORDER_FLAGS = "";
+				USE_HEADERMAP = NO;
+				WARNING_CFLAGS = ("$(inherited)");
+			};
+			name = RelWithDebInfo;
+		};
+		4AA819900BF540D182B6F6A0 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ARCHS = arm64;
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				SDKROOT = "";
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SYMROOT = "/Users/ray/Desktop/OpenGL 3D Engine/OpenGL 3D Engine/build/build";
+			};
+			name = Release;
+		};
+		5B09793ABE7D4A4D862B1035 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ARCHS = arm64;
+				COMBINE_HIDPI_IMAGES = YES;
+				GCC_GENERATE_DEBUGGING_SYMBOLS = YES;
+				GCC_INLINES_ARE_PRIVATE_EXTERN = NO;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = ("'CMAKE_INTDIR=\"$(CONFIGURATION)$(EFFECTIVE_PLATFORM_NAME)\"'","$(inherited)");
+				GCC_SYMBOLS_PRIVATE_EXTERN = NO;
+				INSTALL_PATH = "";
+				ONLY_ACTIVE_ARCH = NO;
+				OTHER_LDFLAGS = ("","$(inherited)");
+				OTHER_REZFLAGS = "";
+				PRODUCT_NAME = ZERO_CHECK;
+				SECTORDER_FLAGS = "";
+				USE_HEADERMAP = NO;
+				WARNING_CFLAGS = ("$(inherited)");
+			};
+			name = Debug;
+		};
+		7F7C6FA749B246BABDDDDC57 /* RelWithDebInfo */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ARCHS = arm64;
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				SDKROOT = "";
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SYMROOT = "/Users/ray/Desktop/OpenGL 3D Engine/OpenGL 3D Engine/build/build";
+			};
+			name = RelWithDebInfo;
+		};
+		81F1835A15DB4233BFE48EAE /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ARCHS = arm64;
+				COMBINE_HIDPI_IMAGES = YES;
+				GCC_GENERATE_DEBUGGING_SYMBOLS = YES;
+				GCC_INLINES_ARE_PRIVATE_EXTERN = NO;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = ("'CMAKE_INTDIR=\"$(CONFIGURATION)$(EFFECTIVE_PLATFORM_NAME)\"'","$(inherited)");
+				GCC_SYMBOLS_PRIVATE_EXTERN = NO;
+				INSTALL_PATH = "";
+				ONLY_ACTIVE_ARCH = NO;
+				OTHER_LDFLAGS = ("","$(inherited)");
+				OTHER_REZFLAGS = "";
+				PRODUCT_NAME = copy_assets;
+				SECTORDER_FLAGS = "";
+				USE_HEADERMAP = NO;
+				WARNING_CFLAGS = ("$(inherited)");
+			};
+			name = Release;
+		};
+		928D9AD782864F77B12BD864 /* MinSizeRel */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ARCHS = arm64;
+				COMBINE_HIDPI_IMAGES = YES;
+				GCC_GENERATE_DEBUGGING_SYMBOLS = YES;
+				GCC_INLINES_ARE_PRIVATE_EXTERN = NO;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = ("'CMAKE_INTDIR=\"$(CONFIGURATION)$(EFFECTIVE_PLATFORM_NAME)\"'","$(inherited)");
+				GCC_SYMBOLS_PRIVATE_EXTERN = NO;
+				INSTALL_PATH = "";
+				ONLY_ACTIVE_ARCH = NO;
+				OTHER_LDFLAGS = ("","$(inherited)");
+				OTHER_REZFLAGS = "";
+				PRODUCT_NAME = copy_assets;
+				SECTORDER_FLAGS = "";
+				USE_HEADERMAP = NO;
+				WARNING_CFLAGS = ("$(inherited)");
+			};
+			name = MinSizeRel;
+		};
+		A97888A092C74E89BAEB862B /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ARCHS = arm64;
+				COMBINE_HIDPI_IMAGES = YES;
+				GCC_GENERATE_DEBUGGING_SYMBOLS = YES;
+				GCC_INLINES_ARE_PRIVATE_EXTERN = NO;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = ("'CMAKE_INTDIR=\"$(CONFIGURATION)$(EFFECTIVE_PLATFORM_NAME)\"'","$(inherited)");
+				GCC_SYMBOLS_PRIVATE_EXTERN = NO;
+				INSTALL_PATH = "";
+				ONLY_ACTIVE_ARCH = NO;
+				OTHER_LDFLAGS = ("","$(inherited)");
+				OTHER_REZFLAGS = "";
+				PRODUCT_NAME = copy_assets;
+				SECTORDER_FLAGS = "";
+				USE_HEADERMAP = NO;
+				WARNING_CFLAGS = ("$(inherited)");
+			};
+			name = Debug;
+		};
+		AC5178E724064C4ABB752983 /* RelWithDebInfo */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ARCHS = arm64;
+				COMBINE_HIDPI_IMAGES = YES;
+				CONFIGURATION_BUILD_DIR = "/Users/ray/Desktop/OpenGL 3D Engine/OpenGL 3D Engine/build/RelWithDebInfo";
+				EXECUTABLE_PREFIX = "";
+				EXECUTABLE_SUFFIX = "";
+				GCC_GENERATE_DEBUGGING_SYMBOLS = YES;
+				GCC_INLINES_ARE_PRIVATE_EXTERN = NO;
+				GCC_OPTIMIZATION_LEVEL = 2;
+				GCC_PREPROCESSOR_DEFINITIONS = ("'CMAKE_INTDIR=\"$(CONFIGURATION)$(EFFECTIVE_PLATFORM_NAME)\"'",GL_SILENCE_DEPRECATION,GLFW_INCLUDE_NONE,"$(inherited)");
+				GCC_SYMBOLS_PRIVATE_EXTERN = NO;
+				HEADER_SEARCH_PATHS = ("\"/Users/ray/Desktop/OpenGL 3D Engine/OpenGL 3D Engine/External/glad/include\"","\"/Users/ray/Desktop/OpenGL 3D Engine/OpenGL 3D Engine/External/glfw/include\"","\"/Users/ray/Desktop/OpenGL 3D Engine/OpenGL 3D Engine/External/glm\"","\"/Users/ray/Desktop/OpenGL 3D Engine/OpenGL 3D Engine/External/stb\"","$(inherited)");
+				INSTALL_PATH = "";
+				ONLY_ACTIVE_ARCH = NO;
+				OTHER_CFLAGS = ("       -DNDEBUG ","$(inherited)");
+				OTHER_CPLUSPLUSFLAGS = " -Wno-deprecated-declarations        -DNDEBUG '-std=gnu++17' ";
+				OTHER_LDFLAGS = (" -Wl,-search_paths_first -Wl,-headerpad_max_install_names","\"/Users/ray/Desktop/OpenGL 3D Engine/OpenGL 3D Engine/External/glfw/libglfw3.a\"","-framework Cocoa","-framework IOKit","-framework CoreVideo","-framework Metal","-framework CoreFoundation","-framework CoreGraphics","$(inherited)");
+				OTHER_REZFLAGS = "";
+				PRODUCT_NAME = OpenGL_3D_Engine;
+				SECTORDER_FLAGS = "";
+				TARGET_TEMP_DIR = "/Users/ray/Desktop/OpenGL 3D Engine/OpenGL 3D Engine/build/build/OpenGL_3D_Engine.build/$(CONFIGURATION)$(EFFECTIVE_PLATFORM_NAME)";
+				USE_HEADERMAP = NO;
+				WARNING_CFLAGS = ("$(inherited)");
+			};
+			name = RelWithDebInfo;
+		};
+		AF12B861A4BF4D31902B07FA /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ARCHS = arm64;
+				COMBINE_HIDPI_IMAGES = YES;
+				CONFIGURATION_BUILD_DIR = "/Users/ray/Desktop/OpenGL 3D Engine/OpenGL 3D Engine/build/Debug";
+				EXECUTABLE_PREFIX = "";
+				EXECUTABLE_SUFFIX = "";
+				GCC_GENERATE_DEBUGGING_SYMBOLS = YES;
+				GCC_INLINES_ARE_PRIVATE_EXTERN = NO;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = ("'CMAKE_INTDIR=\"$(CONFIGURATION)$(EFFECTIVE_PLATFORM_NAME)\"'",GL_SILENCE_DEPRECATION,GLFW_INCLUDE_NONE,"$(inherited)");
+				GCC_SYMBOLS_PRIVATE_EXTERN = NO;
+				HEADER_SEARCH_PATHS = ("\"/Users/ray/Desktop/OpenGL 3D Engine/OpenGL 3D Engine/External/glad/include\"","\"/Users/ray/Desktop/OpenGL 3D Engine/OpenGL 3D Engine/External/glfw/include\"","\"/Users/ray/Desktop/OpenGL 3D Engine/OpenGL 3D Engine/External/glm\"","\"/Users/ray/Desktop/OpenGL 3D Engine/OpenGL 3D Engine/External/stb\"","$(inherited)");
+				INSTALL_PATH = "";
+				ONLY_ACTIVE_ARCH = NO;
+				OTHER_CFLAGS = ("   ","$(inherited)");
+				OTHER_CPLUSPLUSFLAGS = " -Wno-deprecated-declarations        -Wall -Wextra '-std=gnu++17' ";
+				OTHER_LDFLAGS = (" -Wl,-search_paths_first -Wl,-headerpad_max_install_names","\"/Users/ray/Desktop/OpenGL 3D Engine/OpenGL 3D Engine/External/glfw/libglfw3.a\"","-framework Cocoa","-framework IOKit","-framework CoreVideo","-framework Metal","-framework CoreFoundation","-framework CoreGraphics","$(inherited)");
+				OTHER_REZFLAGS = "";
+				PRODUCT_NAME = OpenGL_3D_Engine;
+				SECTORDER_FLAGS = "";
+				TARGET_TEMP_DIR = "/Users/ray/Desktop/OpenGL 3D Engine/OpenGL 3D Engine/build/build/OpenGL_3D_Engine.build/$(CONFIGURATION)$(EFFECTIVE_PLATFORM_NAME)";
+				USE_HEADERMAP = NO;
+				WARNING_CFLAGS = ("$(inherited)");
+			};
+			name = Debug;
+		};
+		B343B23CDA5942E1B2F7AEAF /* MinSizeRel */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ARCHS = arm64;
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				SDKROOT = "";
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SYMROOT = "/Users/ray/Desktop/OpenGL 3D Engine/OpenGL 3D Engine/build/build";
+			};
+			name = MinSizeRel;
+		};
+		D3A036282F784CB997127A8D /* MinSizeRel */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ARCHS = arm64;
+				COMBINE_HIDPI_IMAGES = YES;
+				CONFIGURATION_BUILD_DIR = "/Users/ray/Desktop/OpenGL 3D Engine/OpenGL 3D Engine/build/MinSizeRel";
+				EXECUTABLE_PREFIX = "";
+				EXECUTABLE_SUFFIX = "";
+				GCC_GENERATE_DEBUGGING_SYMBOLS = NO;
+				GCC_INLINES_ARE_PRIVATE_EXTERN = NO;
+				GCC_OPTIMIZATION_LEVEL = s;
+				GCC_PREPROCESSOR_DEFINITIONS = ("'CMAKE_INTDIR=\"$(CONFIGURATION)$(EFFECTIVE_PLATFORM_NAME)\"'",GL_SILENCE_DEPRECATION,GLFW_INCLUDE_NONE,"$(inherited)");
+				GCC_SYMBOLS_PRIVATE_EXTERN = NO;
+				HEADER_SEARCH_PATHS = ("\"/Users/ray/Desktop/OpenGL 3D Engine/OpenGL 3D Engine/External/glad/include\"","\"/Users/ray/Desktop/OpenGL 3D Engine/OpenGL 3D Engine/External/glfw/include\"","\"/Users/ray/Desktop/OpenGL 3D Engine/OpenGL 3D Engine/External/glm\"","\"/Users/ray/Desktop/OpenGL 3D Engine/OpenGL 3D Engine/External/stb\"","$(inherited)");
+				INSTALL_PATH = "";
+				ONLY_ACTIVE_ARCH = NO;
+				OTHER_CFLAGS = ("    -DNDEBUG ","$(inherited)");
+				OTHER_CPLUSPLUSFLAGS = " -Wno-deprecated-declarations     -DNDEBUG '-std=gnu++17' ";
+				OTHER_LDFLAGS = (" -Wl,-search_paths_first -Wl,-headerpad_max_install_names","\"/Users/ray/Desktop/OpenGL 3D Engine/OpenGL 3D Engine/External/glfw/libglfw3.a\"","-framework Cocoa","-framework IOKit","-framework CoreVideo","-framework Metal","-framework CoreFoundation","-framework CoreGraphics","$(inherited)");
+				OTHER_REZFLAGS = "";
+				PRODUCT_NAME = OpenGL_3D_Engine;
+				SECTORDER_FLAGS = "";
+				TARGET_TEMP_DIR = "/Users/ray/Desktop/OpenGL 3D Engine/OpenGL 3D Engine/build/build/OpenGL_3D_Engine.build/$(CONFIGURATION)$(EFFECTIVE_PLATFORM_NAME)";
+				USE_HEADERMAP = NO;
+				WARNING_CFLAGS = ("$(inherited)");
+			};
+			name = MinSizeRel;
+		};
+		DEBC70704CC94DB5A15C7EE4 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ARCHS = arm64;
+				COMBINE_HIDPI_IMAGES = YES;
+				GCC_GENERATE_DEBUGGING_SYMBOLS = YES;
+				GCC_INLINES_ARE_PRIVATE_EXTERN = NO;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = ("'CMAKE_INTDIR=\"$(CONFIGURATION)$(EFFECTIVE_PLATFORM_NAME)\"'","$(inherited)");
+				GCC_SYMBOLS_PRIVATE_EXTERN = NO;
+				INSTALL_PATH = "";
+				ONLY_ACTIVE_ARCH = NO;
+				OTHER_LDFLAGS = ("","$(inherited)");
+				OTHER_REZFLAGS = "";
+				PRODUCT_NAME = ALL_BUILD;
+				SECTORDER_FLAGS = "";
+				USE_HEADERMAP = NO;
+				WARNING_CFLAGS = ("$(inherited)");
+			};
+			name = Release;
+		};
+		E944C5E222E34FE7929E33EB /* RelWithDebInfo */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ARCHS = arm64;
+				COMBINE_HIDPI_IMAGES = YES;
+				GCC_GENERATE_DEBUGGING_SYMBOLS = YES;
+				GCC_INLINES_ARE_PRIVATE_EXTERN = NO;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = ("'CMAKE_INTDIR=\"$(CONFIGURATION)$(EFFECTIVE_PLATFORM_NAME)\"'","$(inherited)");
+				GCC_SYMBOLS_PRIVATE_EXTERN = NO;
+				INSTALL_PATH = "";
+				ONLY_ACTIVE_ARCH = NO;
+				OTHER_LDFLAGS = ("","$(inherited)");
+				OTHER_REZFLAGS = "";
+				PRODUCT_NAME = ZERO_CHECK;
+				SECTORDER_FLAGS = "";
+				USE_HEADERMAP = NO;
+				WARNING_CFLAGS = ("$(inherited)");
+			};
+			name = RelWithDebInfo;
+		};
+		EC30BF20B75540B9A9C01483 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ARCHS = arm64;
+				COMBINE_HIDPI_IMAGES = YES;
+				GCC_GENERATE_DEBUGGING_SYMBOLS = YES;
+				GCC_INLINES_ARE_PRIVATE_EXTERN = NO;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = ("'CMAKE_INTDIR=\"$(CONFIGURATION)$(EFFECTIVE_PLATFORM_NAME)\"'","$(inherited)");
+				GCC_SYMBOLS_PRIVATE_EXTERN = NO;
+				INSTALL_PATH = "";
+				ONLY_ACTIVE_ARCH = NO;
+				OTHER_LDFLAGS = ("","$(inherited)");
+				OTHER_REZFLAGS = "";
+				PRODUCT_NAME = ALL_BUILD;
+				SECTORDER_FLAGS = "";
+				USE_HEADERMAP = NO;
+				WARNING_CFLAGS = ("$(inherited)");
+			};
+			name = Debug;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		31CDB444D2904674BDAE92A1 /* Build configuration list for PBXAggregateTarget "ALL_BUILD" */ = {
+		007BB1310C51429FA2981C08 /* Build configuration list for PBXAggregateTarget "ZERO_CHECK" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				EB842AC17BFB41DF88D02907 /* Debug */,
-				A41FEE7E554D49A0B60D9F84 /* Release */,
-				FACEC800898A42E69B9B50F8 /* MinSizeRel */,
-				194DCBA3B7BC4CAF92AC2978 /* RelWithDebInfo */,
+				5B09793ABE7D4A4D862B1035 /* Debug */,
+				1A35619627534000847758BF /* Release */,
+				184373CBE7FC422882FDE3FC /* MinSizeRel */,
+				E944C5E222E34FE7929E33EB /* RelWithDebInfo */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;
 		};
-		4292EDD707854705A4909A00 /* Build configuration list for PBXProject "OpenGL_3D_Engine" */ = {
+		01596E8976CF40199B6D9142 /* Build configuration list for PBXNativeTarget "OpenGL_3D_Engine" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				E5BA3538A27E4DC4A1D716A1 /* Debug */,
-				2F989CBEA733408CAA2D613B /* Release */,
-				82FF53A4590D4F52ADAB4DAD /* MinSizeRel */,
-				683E3431E9D441429A3AB0EF /* RelWithDebInfo */,
+				AF12B861A4BF4D31902B07FA /* Debug */,
+				01BCC2B5A9514E87962F7779 /* Release */,
+				D3A036282F784CB997127A8D /* MinSizeRel */,
+				AC5178E724064C4ABB752983 /* RelWithDebInfo */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;
 		};
-		534AE714808540EE958FD9FD /* Build configuration list for PBXNativeTarget "OpenGL_3D_Engine" */ = {
+		0F60370F06244A95B6249636 /* Build configuration list for PBXProject "OpenGL_3D_Engine" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				7538396151724695A9FEF032 /* Debug */,
-				CD33C7328FCB4B1EBE1324E2 /* Release */,
-				A60CDDC3FD974C7EAE7750CA /* MinSizeRel */,
-				1A601051BC9640119E391810 /* RelWithDebInfo */,
+				04BD44FE47384F61AEF97E35 /* Debug */,
+				4AA819900BF540D182B6F6A0 /* Release */,
+				B343B23CDA5942E1B2F7AEAF /* MinSizeRel */,
+				7F7C6FA749B246BABDDDDC57 /* RelWithDebInfo */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;
 		};
-		BDCEB00817814024A748B7BE /* Build configuration list for PBXAggregateTarget "copy_assets" */ = {
+		1B46F7B1AD0E4A8B89707A11 /* Build configuration list for PBXAggregateTarget "copy_assets" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				241DEACBE2B34A06A2EBE1B5 /* Debug */,
-				7CB4C2D6129042DB9C8DC125 /* Release */,
-				3E05F2EE9EDF4B7B89794E86 /* MinSizeRel */,
-				E50BE0F06FEE41739DEBE94D /* RelWithDebInfo */,
+				A97888A092C74E89BAEB862B /* Debug */,
+				81F1835A15DB4233BFE48EAE /* Release */,
+				928D9AD782864F77B12BD864 /* MinSizeRel */,
+				3F86CBA03AE44BC7AB40FED1 /* RelWithDebInfo */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;
 		};
-		C1B681970FCE4875811ABFA9 /* Build configuration list for PBXAggregateTarget "ZERO_CHECK" */ = {
+		F023E6073CA34E20A76880EF /* Build configuration list for PBXAggregateTarget "ALL_BUILD" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				130CB724FD044479A46F7842 /* Debug */,
-				EE9CBA3367B84C91B386F37F /* Release */,
-				8F6F3352C5784511877B3BD4 /* MinSizeRel */,
-				AD32E60F0E4046F0BC1C66EF /* RelWithDebInfo */,
+				EC30BF20B75540B9A9C01483 /* Debug */,
+				DEBC70704CC94DB5A15C7EE4 /* Release */,
+				419AF095927647EEB93358DE /* MinSizeRel */,
+				42FADAE397154FECA420B211 /* RelWithDebInfo */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;
 		};
 /* End XCConfigurationList section */
 	};
-	rootObject = 602795F16CCE42B7899FB114 /* Project object */;
+	rootObject = 587AAFBF0E5945CBA4CFEC83 /* Project object */;
 }

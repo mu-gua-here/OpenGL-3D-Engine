@@ -37,17 +37,29 @@ void framebuffer_size_callback(GLFWwindow* window, int width, int height);
 // GLOBAL VARIABLES
 // ============================================================================
 
+// Window
+int window_width = 800;
+int window_height = 600;
+
+// Runtime
+bool firstMouse = true;
 double fps;
 bool paused = false;
-unsigned int total_triangles = 0;
-unsigned int entity_count = 0;
 float update_count = 0;
 float frame_time = 1.0f;
 float speed_multiplier = 1.0f;
-
-GLuint default_texture_id = 0;
 glm::mat4 view;
 glm::mat4 projection;
+
+// Scene stats
+unsigned int total_triangles = 0;
+unsigned int entity_count = 0;
+
+// Game settings
+#define MAX_LIGHTS 16
+float mouse_sensitivity = 0.1f;
+
+GLuint default_texture_id = 0;
 
 std::unordered_set<class Mesh*> global_mesh_registry;
 const glm::vec3 VEC3_NO_CHANGE = glm::vec3(NAN, NAN, NAN);
@@ -69,7 +81,7 @@ void updateFPS(GLFWwindow* window) {
         fps = frameCount / fpsTimer;
         char title[256];
         snprintf(title, sizeof(title),
-            "C++ OpenGL 3D Engine - FPS: %.1f | Frame time: %.3f ms",
+            "OpenGL 3D Engine - FPS: %.1f | Frame time: %.3f ms",
             fps, frame_time * 1000.0);
         glfwSetWindowTitle(window, title);
         frameCount = 0;
@@ -78,14 +90,14 @@ void updateFPS(GLFWwindow* window) {
 }
 
 // ============================================================================
-// FILE MANAGEMENT
+// ASSET PATH BUILDING
 // ============================================================================
 
 std::string getProjectRoot() {
     std::filesystem::path exe_path = std::filesystem::current_path();
     std::filesystem::path project_root = exe_path;
     
-    while (!std::filesystem::exists(project_root / "OBJ_models") &&
+    while (!std::filesystem::exists(project_root / "OBJ_Models") &&
            project_root != project_root.parent_path()) {
         project_root = project_root.parent_path();
     }
@@ -94,7 +106,10 @@ std::string getProjectRoot() {
 }
 
 std::string buildAssetPath(const std::string& relative_path) {
-    static std::string project_root = getProjectRoot();
+    static std::string project_root;
+    if (project_root.empty()) {
+        project_root = getProjectRoot();
+    }
     return project_root + "/" + relative_path;
 }
 
@@ -175,11 +190,14 @@ GLuint loadTexture(const std::string& path) {
     
     GLenum internalFormat, dataFormat;
     if (channels == 1) {
-        internalFormat = GL_R8; dataFormat = GL_RED;
+        internalFormat = GL_R8;
+        dataFormat = GL_RED;
     } else if (channels == 3) {
-        internalFormat = GL_RGB8; dataFormat = GL_RGB;
+        internalFormat = GL_RGB8;
+        dataFormat = GL_RGB;
     } else if (channels == 4) {
-        internalFormat = GL_RGBA8; dataFormat = GL_RGBA;
+        internalFormat = GL_RGBA8;
+        dataFormat = GL_RGBA;
     } else {
         stbi_image_free(data);
         return default_texture_id;
@@ -212,7 +230,7 @@ typedef struct {
 
 std::vector<Light> lights;
 
-void create_light_source(glm::vec3 position, glm::vec3 color, float intensity) {
+void createLightSource(glm::vec3 position, glm::vec3 color, float intensity) {
     Light light;
     light.position = position;
     light.color = color;
@@ -235,6 +253,7 @@ public:
     size_t vertex_count;
     size_t index_count;
     unsigned int TRIANGLE_COUNT;
+    unsigned int INDEX_COUNT;
     GLuint VAO, VBO, EBO;
     GLuint texture_id;
     Material material;
@@ -266,7 +285,7 @@ public:
         if (VBO != 0) { glDeleteBuffers(1, &VBO); VBO = 0; }
         if (EBO != 0) { glDeleteBuffers(1, &EBO); EBO = 0; }
         
-        vertex_count = index_count = TRIANGLE_COUNT = 0;
+        vertex_count = index_count = TRIANGLE_COUNT = INDEX_COUNT = 0;
         is_cleaned_up = true;
     }
     
@@ -294,22 +313,9 @@ typedef struct {
     glm::vec3 position;
     glm::vec3 rotation;
     glm::vec3 scale;
-    Mesh* mesh;
+    std::vector<Mesh*> meshes;
     int active;
 } Entity;
-
-Entity create_entity(const char* name, Mesh* mesh, glm::vec3 pos, glm::vec3 rotation, glm::vec3 scale) {
-    Entity entity;
-    entity.name = name;
-    entity.position = pos;
-    entity.rotation.x = rotation.x * M_PI / 180.0f;
-    entity.rotation.y = rotation.y * M_PI / 180.0f;
-    entity.rotation.z = rotation.z * M_PI / 180.0f;
-    entity.scale = scale;
-    entity.mesh = mesh;
-    entity.active = 1;
-    return entity;
-}
 
 class EntityManager {
 private:
@@ -328,9 +334,9 @@ public:
             if (active_flags[i] && entities[i].name == name) {
                 if (!isnan(pos.x)) entities[i].position = pos;
                 if (!isnan(rot.x)) {
-                    entities[i].rotation.x = rot.x * M_PI / 180.0f;
-                    entities[i].rotation.y = rot.y * M_PI / 180.0f;
-                    entities[i].rotation.z = rot.z * M_PI / 180.0f;
+                    entities[i].rotation.x = rot.x;
+                    entities[i].rotation.y = rot.y;
+                    entities[i].rotation.z = rot.z;
                 }
                 if (!isnan(scale.x)) entities[i].scale = scale;
                 return true;
@@ -349,11 +355,34 @@ public:
     }
     
     void compactEntities() {
-        // Simple implementation - just remove inactive entities
+        // Remove inactive entities
     }
 };
 
 EntityManager entity_manager;
+
+void createEntity(const char* name, std::vector<Mesh*> meshes, glm::vec3 pos, glm::vec3 rotation, glm::vec3 scale) {
+    Entity entity;
+    entity.name = name;
+    entity.position = pos;
+    entity.rotation.x = rotation.x;
+    entity.rotation.y = rotation.y;
+    entity.rotation.z = rotation.z;
+    entity.scale = scale;
+    entity.meshes = meshes;
+    entity.active = 1;
+    entity_manager.addEntity(entity);
+    
+    unsigned int mesh_triangles = 0;
+    for (Mesh* mesh : meshes) {
+        if (mesh) mesh_triangles += mesh->TRIANGLE_COUNT;
+    }
+    
+    total_triangles += mesh_triangles;
+    
+    printf("Created entity '%s' with %zu submesh(es) (total triangles: %u)\n",
+           name, meshes.size(), mesh_triangles);
+}
 
 // ============================================================================
 // CAMERA SYSTEM
@@ -376,12 +405,12 @@ Camera global_camera;
 
 Camera create_camera(float aspect) {
     Camera cam;
-    cam.position = glm::vec3(0, 2, 5);  // Move camera back to see objects
+    cam.position = glm::vec3(0, 2, 9);
     cam.front = glm::vec3(0, 0, -1);
     cam.up = glm::vec3(0, 1, 0);
     cam.right = glm::vec3(1, 0, 0);
     cam.yaw = -90.0f;
-    cam.pitch = -10.0f;  // Look slightly down
+    cam.pitch = 0.0f;
     cam.fov = glm::radians(45.0f);
     cam.aspect_ratio = aspect;
     cam.near_plane = 0.1f;
@@ -404,8 +433,7 @@ glm::mat4 camera_get_projection(Camera* cam) {
 }
 
 glm::mat4 camera_get_view_matrix(Camera* cam) {
-    glm::vec3 target = cam->position + cam->front;
-    return lookAt(cam->position, target, cam->up);
+    return lookAt(cam->position, cam->position + cam->front, cam->up);
 }
 
 // ============================================================================
@@ -586,7 +614,7 @@ out vec4 FragColor;
 
 uniform sampler2D u_texture;
 
-#define MAX_LIGHTS 8
+#define MAX_LIGHTS 16
 uniform vec3 lightPositions[MAX_LIGHTS];
 uniform vec3 lightColors[MAX_LIGHTS];
 uniform float lightIntensities[MAX_LIGHTS];
@@ -605,16 +633,10 @@ void main() {
         discard;
     }
     
-    if (lightCount == 0) {
-        vec3 ambient = materialAmbient * 0.5;
-        FragColor = vec4(ambient, 1.0) * texColor * vertexColor;
-        return;
-    }
-    
     vec3 norm = normalize(Normal);
     vec3 finalLighting = vec3(0.0);
 
-    for (int i = 0; i < lightCount && i < MAX_LIGHTS; ++i) {
+    for (int i = 0; i < lightCount && i < MAX_LIGHTS; i++) {
         vec3 ambient = materialAmbient * lightColors[i] * 0.1;
         
         vec3 lightDir = normalize(lightPositions[i] - FragPos);
@@ -628,7 +650,6 @@ void main() {
 
         finalLighting += (ambient + diffuse + specular) * lightIntensities[i];
     }
-
     FragColor = vec4(finalLighting, 1.0) * texColor * vertexColor;
 }
 )";
@@ -652,8 +673,24 @@ public:
         }
     }
     
+    void drawEntity(Entity* entity, const Camera& camera, const std::vector<Light>& lights) {
+        if (!entity->active) return;
+        
+        // Render all meshes of this entity with the same attributes but different materials
+        for (Mesh* mesh : entity->meshes) {
+            if (mesh && mesh->isValid()) {
+                drawMesh(entity, mesh, camera, lights);
+            }
+        }
+    }
+    
     void drawMesh(Entity* entity, Mesh* mesh, const Camera& camera, const std::vector<Light>& lights) {
         if (!entity->active || mesh->TRIANGLE_COUNT == 0 || !mesh->isValid()) {
+            return;
+        }
+        
+        if (mesh->VAO == 0 || mesh->VBO == 0) {
+            printf("Error: Mesh has an invalid VAO (%u) or VBO (%u).\n", mesh->VAO, mesh->VBO);
             return;
         }
         
@@ -661,49 +698,45 @@ public:
         
         // Calculate matrices
         glm::mat4 scale_matrix = scale(glm::mat4(1.0f), entity->scale);
-        glm::mat4 rotation_x = rotate(glm::mat4(1.0f), entity->rotation.x, glm::vec3(1.0f, 0.0f, 0.0f));
-        glm::mat4 rotation_y = rotate(glm::mat4(1.0f), entity->rotation.y, glm::vec3(0.0f, 1.0f, 0.0f));
-        glm::mat4 rotation_z = rotate(glm::mat4(1.0f), entity->rotation.z, glm::vec3(0.0f, 0.0f, 1.0f));
+        glm::mat4 rotation_x = rotate(glm::mat4(1.0f), glm::radians(entity->rotation.x), glm::vec3(1.0f, 0.0f, 0.0f));
+        glm::mat4 rotation_y = rotate(glm::mat4(1.0f), glm::radians(entity->rotation.y), glm::vec3(0.0f, 1.0f, 0.0f));
+        glm::mat4 rotation_z = rotate(glm::mat4(1.0f), glm::radians(entity->rotation.z), glm::vec3(0.0f, 0.0f, 1.0f));
         glm::mat4 rotation = rotation_z * rotation_y * rotation_x;
         glm::mat4 translation = translate(glm::mat4(1.0f), entity->position);
+                
         glm::mat4 model = translation * rotation * scale_matrix;
-        
-        glm::mat4 view_matrix = camera_get_view_matrix(const_cast<Camera*>(&camera));
-        glm::mat4 projection_matrix = camera_get_projection(const_cast<Camera*>(&camera));
-        glm::mat3 normal_matrix = transpose(inverse(glm::mat3(model)));
+        glm::mat3 normal = transpose(inverse(glm::mat3(model)));
         
         // Set uniforms
         main_shader->setMat4("model", model);
-        main_shader->setMat4("view", view_matrix);
-        main_shader->setMat4("projection", projection_matrix);
-        main_shader->setMat3("normalMatrix", normal_matrix);
+        main_shader->setMat4("view", view);
+        main_shader->setMat4("projection", projection);
+        main_shader->setMat3("normalMatrix", normal);
         
         // Set lighting
-        int light_count = std::min(static_cast<int>(lights.size()), 8);
+        int light_count = std::min(static_cast<int>(lights.size()), MAX_LIGHTS);
         main_shader->setInt("lightCount", light_count);
         main_shader->setVec3("viewPos", camera.position);
         
-        if (light_count > 0) {
-            std::vector<glm::vec3> positions, colors;
-            std::vector<float> intensities;
-            
-            for (int i = 0; i < light_count; i++) {
-                positions.push_back(lights[i].position);
-                colors.push_back(lights[i].color);
-                intensities.push_back(lights[i].intensity);
-            }
-            
-            main_shader->setVec3Array("lightPositions", positions);
-            main_shader->setVec3Array("lightColors", colors);
-            main_shader->setFloatArray("lightIntensities", intensities);
+        std::vector<glm::vec3> positions, colors;
+        std::vector<float> intensities;
+        
+        for (int i = 0; i < light_count; i++) {
+            positions.push_back(lights[i].position);
+            colors.push_back(lights[i].color);
+            intensities.push_back(lights[i].intensity);
         }
+        
+        main_shader->setVec3Array("lightPositions", positions);
+        main_shader->setVec3Array("lightColors", colors);
+        main_shader->setFloatArray("lightIntensities", intensities);
         
         // Set material
         main_shader->setVec3("materialAmbient", mesh->material.ambient);
         main_shader->setVec3("materialDiffuse", mesh->material.diffuse);
         main_shader->setVec3("materialSpecular", mesh->material.specular);
         main_shader->setFloat("materialShininess", mesh->material.shininess);
-        
+                
         // Set texture
         GLuint texture_to_use = (mesh->texture_id != 0) ? mesh->texture_id : default_texture_id;
         glActiveTexture(GL_TEXTURE0);
@@ -712,68 +745,10 @@ public:
         
         // Draw
         glBindVertexArray(mesh->VAO);
-        glDrawArrays(GL_TRIANGLES, 0, mesh->TRIANGLE_COUNT * 3);
+        glDrawElements(GL_TRIANGLES, mesh->INDEX_COUNT, GL_UNSIGNED_INT, 0);
         glBindVertexArray(0);
     }
 };
-
-// ============================================================================
-// SIMPLE MESH CREATION FOR TESTING
-// ============================================================================
-
-Mesh* createTestCube() {
-    float cube_vertices[] = {
-        // Front face - positions(3) + colors(4) + uvs(2) + normals(3) = 12 floats per vertex
-        -1.0f, -1.0f,  1.0f,  1.0f, 0.0f, 0.0f, 1.0f,  0.0f, 0.0f,  0.0f, 0.0f, 1.0f,
-         1.0f, -1.0f,  1.0f,  1.0f, 0.0f, 0.0f, 1.0f,  1.0f, 0.0f,  0.0f, 0.0f, 1.0f,
-         1.0f,  1.0f,  1.0f,  1.0f, 0.0f, 0.0f, 1.0f,  1.0f, 1.0f,  0.0f, 0.0f, 1.0f,
-         1.0f,  1.0f,  1.0f,  1.0f, 0.0f, 0.0f, 1.0f,  1.0f, 1.0f,  0.0f, 0.0f, 1.0f,
-        -1.0f,  1.0f,  1.0f,  1.0f, 0.0f, 0.0f, 1.0f,  0.0f, 1.0f,  0.0f, 0.0f, 1.0f,
-        -1.0f, -1.0f,  1.0f,  1.0f, 0.0f, 0.0f, 1.0f,  0.0f, 0.0f,  0.0f, 0.0f, 1.0f,
-        
-        // Back face
-        -1.0f, -1.0f, -1.0f,  0.0f, 1.0f, 0.0f, 1.0f,  0.0f, 0.0f,  0.0f, 0.0f, -1.0f,
-         1.0f, -1.0f, -1.0f,  0.0f, 1.0f, 0.0f, 1.0f,  1.0f, 0.0f,  0.0f, 0.0f, -1.0f,
-         1.0f,  1.0f, -1.0f,  0.0f, 1.0f, 0.0f, 1.0f,  1.0f, 1.0f,  0.0f, 0.0f, -1.0f,
-         1.0f,  1.0f, -1.0f,  0.0f, 1.0f, 0.0f, 1.0f,  1.0f, 1.0f,  0.0f, 0.0f, -1.0f,
-        -1.0f,  1.0f, -1.0f,  0.0f, 1.0f, 0.0f, 1.0f,  0.0f, 1.0f,  0.0f, 0.0f, -1.0f,
-        -1.0f, -1.0f, -1.0f,  0.0f, 1.0f, 0.0f, 1.0f,  0.0f, 0.0f,  0.0f, 0.0f, -1.0f,
-    };
-    
-    Mesh* mesh = new Mesh();
-    mesh->TRIANGLE_COUNT = 4; // 2 triangles per face, 2 faces for simplicity
-    mesh->vertex_count = 12 * 12; // 12 vertices * 12 floats per vertex
-    
-    // Set vertices using vector
-    std::vector<float> vertices_vec(cube_vertices, cube_vertices + mesh->vertex_count);
-    mesh->setVertices(vertices_vec);
-    
-    // Create OpenGL objects
-    glGenVertexArrays(1, &mesh->VAO);
-    glGenBuffers(1, &mesh->VBO);
-    
-    glBindVertexArray(mesh->VAO);
-    glBindBuffer(GL_ARRAY_BUFFER, mesh->VBO);
-    glBufferData(GL_ARRAY_BUFFER, mesh->vertex_count * sizeof(float), mesh->vertices_data.data(), GL_STATIC_DRAW);
-    
-    // Vertex attributes: position(3) + color(4) + texCoord(2) + normal(3) = 12 floats
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 12 * sizeof(float), (void*)0);
-    glEnableVertexAttribArray(0);
-    glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, 12 * sizeof(float), (void*)(3 * sizeof(float)));
-    glEnableVertexAttribArray(1);
-    glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 12 * sizeof(float), (void*)(7 * sizeof(float)));
-    glEnableVertexAttribArray(2);
-    glVertexAttribPointer(3, 3, GL_FLOAT, GL_FALSE, 12 * sizeof(float), (void*)(9 * sizeof(float)));
-    glEnableVertexAttribArray(3);
-    
-    glBindVertexArray(0);
-    
-    mesh->texture_id = default_texture_id;
-    mesh->material = createDefaultMaterial();
-    
-    printf("Created test cube mesh with %u triangles\n", mesh->TRIANGLE_COUNT);
-    return mesh;
-}
 
 // ============================================================================
 // OBJ AND MTL LOADERS
@@ -781,14 +756,45 @@ Mesh* createTestCube() {
 
 void loadMTL(const std::string& mtl_path, std::unordered_map<std::string, Material>& materials);
 
+struct Vertex {
+    glm::vec3 position;
+    glm::vec4 color;
+    glm::vec2 texcoord;
+    glm::vec3 normal;
+
+    bool operator==(const Vertex& other) const {
+        return position == other.position &&
+               texcoord == other.texcoord &&
+               normal == other.normal &&
+               color == other.color;
+    }
+};
+
+namespace std {
+    template<> struct hash<Vertex> {
+        size_t operator()(const Vertex& v) const {
+            return ((hash<float>()(v.position.x) ^ hash<float>()(v.position.y) << 1) >> 1)
+                 ^ (hash<float>()(v.position.z) << 1)
+                 ^ (hash<float>()(v.texcoord.x) << 2)
+                 ^ (hash<float>()(v.texcoord.y) << 3)
+                 ^ (hash<float>()(v.normal.x) << 4)
+                 ^ (hash<float>()(v.normal.y) << 5)
+                 ^ (hash<float>()(v.normal.z) << 6);
+        }
+    };
+}
+
 std::vector<Mesh*> loadOBJWithMTL(const std::string& obj_path) {
     std::ifstream file(obj_path);
     if (!file.is_open()) {
         std::cerr << "Error: Cannot open file " << obj_path << std::endl;
         return {};
     }
-
+    
     std::unordered_map<std::string, Material> materials;
+    std::unordered_map<std::string, std::vector<Vertex>> unique_vertices;
+    std::unordered_map<std::string, std::vector<unsigned int>> indices_by_material;
+    std::unordered_map<std::string, std::unordered_map<Vertex, unsigned int>> vertex_to_index;
     std::string current_material_name;
     
     // First pass to load MTL file
@@ -848,81 +854,84 @@ std::vector<Mesh*> loadOBJWithMTL(const std::string& obj_path) {
             ss >> v1_str >> v2_str >> v3_str >> v4_str;
 
             // Process first triangle of face
-            auto process_vertex = [&](const std::string& v_str) {
+            auto process_vertex = [&](const std::string& v_str, const std::string& mat_name) {
                 std::stringstream v_ss(v_str);
                 std::string v, vt, vn;
                 std::getline(v_ss, v, '/');
                 std::getline(v_ss, vt, '/');
                 std::getline(v_ss, vn, '/');
-                
+
                 int v_idx = std::stoi(v) - 1;
                 int vt_idx = std::stoi(vt) - 1;
                 int vn_idx = std::stoi(vn) - 1;
-                
-                vertices_by_material[current_material_name].push_back(temp_vertices[v_idx].x);
-                vertices_by_material[current_material_name].push_back(temp_vertices[v_idx].y);
-                vertices_by_material[current_material_name].push_back(temp_vertices[v_idx].z);
 
-                vertices_by_material[current_material_name].push_back(materials[current_material_name].diffuse_color.r);
-                vertices_by_material[current_material_name].push_back(materials[current_material_name].diffuse_color.g);
-                vertices_by_material[current_material_name].push_back(materials[current_material_name].diffuse_color.b);
-                vertices_by_material[current_material_name].push_back(materials[current_material_name].diffuse_color.a);
-                
-                vertices_by_material[current_material_name].push_back(temp_texcoords[vt_idx].x);
-                vertices_by_material[current_material_name].push_back(temp_texcoords[vt_idx].y);
+                Vertex vertex;
+                vertex.position = temp_vertices[v_idx];
+                vertex.texcoord = temp_texcoords[vt_idx];
+                vertex.normal = temp_normals[vn_idx];
+                vertex.color = materials[mat_name].diffuse_color.toVec4();
 
-                vertices_by_material[current_material_name].push_back(temp_normals[vn_idx].x);
-                vertices_by_material[current_material_name].push_back(temp_normals[vn_idx].y);
-                vertices_by_material[current_material_name].push_back(temp_normals[vn_idx].z);
+                auto& v_map = vertex_to_index[mat_name];
+                auto& verts = unique_vertices[mat_name];
+                auto& inds = indices_by_material[mat_name];
+
+                if (v_map.count(vertex) == 0) {
+                    v_map[vertex] = static_cast<unsigned int>(verts.size());
+                    verts.push_back(vertex);
+                }
+
+                inds.push_back(v_map[vertex]);
             };
 
-            process_vertex(v1_str);
-            process_vertex(v2_str);
-            process_vertex(v3_str);
-
-            if (!v4_str.empty()) { // Handle quads
-                process_vertex(v1_str);
-                process_vertex(v3_str);
-                process_vertex(v4_str);
+            process_vertex(v1_str, current_material_name);
+            process_vertex(v2_str, current_material_name);
+            process_vertex(v3_str, current_material_name);
+            if (!v4_str.empty()) {
+                process_vertex(v1_str, current_material_name);
+                process_vertex(v3_str, current_material_name);
+                process_vertex(v4_str, current_material_name);
             }
+
         }
     }
 
     std::vector<Mesh*> meshes;
-    for (const auto& pair : vertices_by_material) {
+    for (const auto& pair : unique_vertices) {
         const std::string& mat_name = pair.first;
-        const std::vector<float>& vertices = pair.second;
-        
+        const std::vector<Vertex>& vertices = pair.second;
+        const std::vector<unsigned int>& indices = indices_by_material[mat_name];
+
         Mesh* mesh = new Mesh();
-        mesh->setVertices(vertices);
-        mesh->TRIANGLE_COUNT = static_cast<unsigned int>(vertices.size() / 12 / 3);
+        mesh->TRIANGLE_COUNT = static_cast<unsigned int>(indices.size() / 3);
+        mesh->INDEX_COUNT = static_cast<unsigned int>(indices.size());
         mesh->material = materials.at(mat_name);
         mesh->texture_id = materials.at(mat_name).texture_id;
 
-        // OpenGL setup
         glGenVertexArrays(1, &mesh->VAO);
         glGenBuffers(1, &mesh->VBO);
-        
+        glGenBuffers(1, &mesh->EBO);
+
         glBindVertexArray(mesh->VAO);
+
         glBindBuffer(GL_ARRAY_BUFFER, mesh->VBO);
-        glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(float), vertices.data(), GL_STATIC_DRAW);
-        
-        // Vertex attributes
-        GLsizei stride = 12 * sizeof(float);
-        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, stride, (void*)0);
+        glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(Vertex), vertices.data(), GL_STATIC_DRAW);
+
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, mesh->EBO);
+        glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.size() * sizeof(unsigned int), indices.data(), GL_STATIC_DRAW);
+
+        GLsizei stride = sizeof(Vertex);
+        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, stride, (void*)offsetof(Vertex, position));
         glEnableVertexAttribArray(0);
-        glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, stride, (void*)(3 * sizeof(float)));
+        glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, stride, (void*)offsetof(Vertex, color));
         glEnableVertexAttribArray(1);
-        glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, stride, (void*)(7 * sizeof(float)));
+        glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, stride, (void*)offsetof(Vertex, texcoord));
         glEnableVertexAttribArray(2);
-        glVertexAttribPointer(3, 3, GL_FLOAT, GL_FALSE, stride, (void*)(9 * sizeof(float)));
+        glVertexAttribPointer(3, 3, GL_FLOAT, GL_FALSE, stride, (void*)offsetof(Vertex, normal));
         glEnableVertexAttribArray(3);
-        
+
         glBindVertexArray(0);
-        glBindBuffer(GL_ARRAY_BUFFER, 0);
-        
+
         meshes.push_back(mesh);
-        total_triangles += mesh->TRIANGLE_COUNT;
     }
     
     return meshes;
@@ -968,34 +977,19 @@ void loadMTL(const std::string& mtl_path, std::unordered_map<std::string, Materi
     }
 }
 
-// Function to create entity after loading
-std::vector<Mesh*> create_mesh_with_obj(const std::string& name, const std::string& obj_path, glm::vec3 center, glm::vec3 rotation, glm::vec3 scale) {
-    std::cout << "Loading OBJ: " << obj_path << std::endl;
+std::vector<Mesh*> loadOBJMesh(const std::string& obj_path) {
     std::vector<Mesh*> meshes = loadOBJWithMTL(obj_path);
 
     if (meshes.empty()) {
         std::cerr << "Failed to load OBJ file: " << obj_path << std::endl;
         return {};
-    }
-
-    for (Mesh* mesh : meshes) {
-        Entity new_entity; // Assuming create_entity takes these as args
-        new_entity.name = name;
-        new_entity.mesh = mesh;
-        new_entity.position = center;
-        new_entity.rotation = rotation;
-        new_entity.scale = scale;
-        
-        entity_manager.addEntity(new_entity);
+    } else {
+        std::cerr << "Successfully loaded OBJ file: " << obj_path << std::endl;
     }
 
     entity_count++;
     return meshes;
 }
-
-// ============================================================================
-// MAIN FUNCTION
-// ============================================================================
 
 int main() {
     
@@ -1011,15 +1005,16 @@ int main() {
         return -1;
     }
     
+    // Version number
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
     glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
     
-    // Anti-aliaising
+    // Anti-aliasing
     glfwWindowHint(GLFW_SAMPLES, 4);
     
-    GLFWwindow* window = glfwCreateWindow(800, 600, "C++ OpenGL 3D Engine", NULL, NULL);
+    GLFWwindow* window = glfwCreateWindow(window_width, window_height, "OpenGL 3D Engine", NULL, NULL);
     if (!window) {
         printf("Failed to create GLFW window\n");
         glfwTerminate();
@@ -1053,11 +1048,9 @@ int main() {
     }
     
     // Initialize camera
-    global_camera = create_camera(800.0f / 600.0f);
+    global_camera = create_camera(static_cast<float>(window_width) / static_cast<float>(window_height));
     camera_update_vectors(&global_camera);
-    
-    // Pixel rendering configurations
-    
+        
     // Z buffer
     glEnable(GL_DEPTH_TEST);
     glDepthFunc(GL_LESS);
@@ -1073,25 +1066,26 @@ int main() {
     
     // CREATE LIGHT SOURCES //
     
-    create_light_source(glm::vec3(0, 0, 0), glm::vec3(1, 1, 1), 1.0f);
+    createLightSource(glm::vec3(0, 0, 0), glm::vec3(1, 1, 1), 1.0f);
+    createLightSource(glm::vec3(0, 10, 0), glm::vec3(1, 1, 1), 1.0f);
         
-    // CREATE TEST CUBES //
+    // LOAD OBJ MESHES //
     
-    Mesh* cube1 = createTestCube();
-    Mesh* cube2 = createTestCube();
-    Mesh* cube3 = createTestCube();
+    std::vector<Mesh*> level_mesh = loadOBJMesh(buildAssetPath("OBJ_Models/Level/level.obj"));
+    std::vector<Mesh*> tree_mesh = loadOBJMesh(buildAssetPath("OBJ_Models/Realistic_tree/tree.obj"));
+    std::vector<Mesh*> instructions_mesh = loadOBJMesh(buildAssetPath("OBJ_Models/Instructions_Panel/quad.obj"));
+    std::vector<Mesh*> cube_mesh = loadOBJMesh(buildAssetPath("OBJ_Models/Cube/cube.obj"));
     
-    Entity entity1 = create_entity("cube1", cube1, glm::vec3(-3, 0, -8), glm::vec3(0, 0, 0), glm::vec3(1, 1, 1));
-    Entity entity2 = create_entity("cube2", cube2, glm::vec3(0, 0, -8), glm::vec3(0, 45, 0), glm::vec3(1, 1, 1));
-    Entity entity3 = create_entity("cube3", cube3, glm::vec3(3, 0, -8), glm::vec3(0, 0, 0), glm::vec3(1, 1, 1));
+    // CREATE ENTITIES //
     
-    entity_manager.addEntity(entity1);
-    entity_manager.addEntity(entity2);
-    entity_manager.addEntity(entity3);
+    createEntity("level", level_mesh, glm::vec3(0, 0, 0), glm::vec3(0, 0, 0), glm::vec3(10, 10, 10));
+    createEntity("tree", tree_mesh, glm::vec3(0, 0, 0), glm::vec3(0, 0, 0), glm::vec3(1, 1, 1));
+    createEntity("instructions", instructions_mesh, glm::vec3(0, 2, 4), glm::vec3(0, 0, 0), glm::vec3(1, 1, 1));
+    createEntity("cube", cube_mesh, glm::vec3(5, 3, -6), glm::vec3(0, 0, 0), glm::vec3(1, 1, 1));
     
     printf("Total triangles: %d\n", total_triangles);
     printf("Active entities: %zu\n", entity_manager.size());
-      
+    
     // ============================================================================
     // MAIN LOOP
     // ============================================================================
@@ -1101,23 +1095,50 @@ int main() {
         updateFPS(window);
         
         if (!paused) {
-            float camera_speed = 0.05f;
-            if (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS) {
-                camera_speed *= 2.0f;
+            
+            // ============================================================================
+            // UPDATE SCENE OBJECTS
+            // ============================================================================
+            
+            // UPDATE LIGHTS
+            lights[0].position = global_camera.position;
+            
+            // UPDATE OBJECTS
+            entity_manager.updateEntity("cube", VEC3_NO_CHANGE, glm::vec3(update_count, update_count * 0.5f, 0), VEC3_NO_CHANGE);
+            
+            update_count += speed_multiplier;
+            
+            // ============================================================================
+            // PLAYER TICK
+            // ============================================================================
+            
+            float yaw_rad = global_camera.yaw * M_PI / 180.0f;
+            float sin_yaw = sinf(yaw_rad);
+            float cos_yaw = cosf(yaw_rad);
+            glm::vec3 cam_offset = glm::vec3(0.0f);
+            
+            float camera_speed = speed_multiplier * 0.05f;
+            
+            // Sprint
+            if (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_RIGHT_SHIFT) == GLFW_PRESS) {
+                camera_speed *= 2;
             }
             
+            // Horizontal movement
             if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) {
-                global_camera.position += camera_speed * global_camera.front;
+                cam_offset = cam_offset + glm::vec3(cos_yaw, 0, sin_yaw);
             }
             if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) {
-                global_camera.position -= camera_speed * global_camera.front;
+                cam_offset = cam_offset + glm::vec3(-cos_yaw, 0, -sin_yaw);
             }
             if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) {
-                global_camera.position -= camera_speed * global_camera.right;
+                cam_offset = cam_offset + glm::vec3(sin_yaw, 0, -cos_yaw);
             }
             if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) {
-                global_camera.position += camera_speed * global_camera.right;
+                cam_offset = cam_offset + glm::vec3(-sin_yaw, 0, cos_yaw);
             }
+            
+            // Vertical movement
             if (glfwGetKey(window, GLFW_KEY_E) == GLFW_PRESS) {
                 global_camera.position.y += camera_speed;
             }
@@ -1125,43 +1146,42 @@ int main() {
                 global_camera.position.y -= camera_speed;
             }
             
-            // Update matrices
+            if (glm::length(cam_offset) > 0.0f) {
+                cam_offset = normalize(cam_offset);
+            }
+            global_camera.position = global_camera.position + cam_offset * camera_speed;
+            
+            // Update camera matrices
             view = camera_get_view_matrix(&global_camera);
             projection = camera_get_projection(&global_camera);
-            
-            // Update lights
-            lights[0].position = global_camera.position;
-            
-            // Rotate middle cube
-            entity_manager.updateEntity("cube2", VEC3_NO_CHANGE, glm::vec3(update_count, update_count * 0.5f, 0), VEC3_NO_CHANGE);
-            update_count += 1.0f;
         }
         
         // Clear background
         glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         
+        
         // Render all entities
         for (size_t i = 0; i < entity_manager.size(); i++) {
             Entity* entity = entity_manager.getEntityAt(i);
             if (entity && entity->active) {
-                renderer->drawMesh(entity, entity->mesh, global_camera, lights);
+                renderer->drawEntity(entity, global_camera, lights);
             }
         }
         
         glfwSwapBuffers(window);
         
         // Handle pause/unpause
-        if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS) {
-            if (glfwGetInputMode(window, GLFW_CURSOR) == GLFW_CURSOR_DISABLED) {
+        if (glfwGetInputMode(window, GLFW_CURSOR) == GLFW_CURSOR_NORMAL) {
+            if (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT)) {
+                paused = false;
+                firstMouse = true;
+                glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED); // Enable pointerlock
+            }
+        } else {
+            if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS) {
                 paused = true;
                 glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL); // Disable pointerlock
-            }
-        }
-        if (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT)) {
-            if (glfwGetInputMode(window, GLFW_CURSOR) == GLFW_CURSOR_NORMAL) {
-                paused = false;
-                glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED); // Enable pointerlock
             }
         }
     }
@@ -1189,7 +1209,6 @@ int main() {
 void mouse_callback(GLFWwindow* window, double xpos, double ypos) {
     static double lastX = 400.0;
     static double lastY = 300.0;
-    static bool firstMouse = true;
     
     if (firstMouse) {
         lastX = xpos;
@@ -1204,9 +1223,8 @@ void mouse_callback(GLFWwindow* window, double xpos, double ypos) {
     lastX = xpos;
     lastY = ypos;
 
-    float sensitivity = 0.1f;
-    xoffset *= sensitivity;
-    yoffset *= sensitivity;
+    xoffset *= mouse_sensitivity;
+    yoffset *= mouse_sensitivity;
     
     global_camera.yaw += xoffset;
     global_camera.pitch += yoffset;
@@ -1218,9 +1236,11 @@ void mouse_callback(GLFWwindow* window, double xpos, double ypos) {
 }
 
 void framebuffer_size_callback(GLFWwindow* window, int width, int height) {
+    window_width = width;
+    window_height = height;
     (void)window;
     glViewport(0, 0, width, height);
     if (height > 0) {
-        global_camera.aspect_ratio = (float)width / (float)height;
+        global_camera.aspect_ratio = static_cast<float>(width) / static_cast<float>(height);
     }
 }

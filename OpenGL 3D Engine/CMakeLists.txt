@@ -62,8 +62,8 @@ target_link_libraries(${PROJECT_NAME}
 set(ASSETS_OUTPUT_DIR "${CMAKE_BINARY_DIR}")
 
 # Copy assets to build directory
-file(COPY "${CMAKE_SOURCE_DIR}/OBJ_models/" 
-     DESTINATION "${ASSETS_OUTPUT_DIR}/OBJ_models/")
+file(COPY "${CMAKE_SOURCE_DIR}/OBJ_Models/" 
+     DESTINATION "${ASSETS_OUTPUT_DIR}/OBJ_Models/")
 file(COPY "${CMAKE_SOURCE_DIR}/Skyboxes/" 
      DESTINATION "${ASSETS_OUTPUT_DIR}/Skyboxes/")
 
@@ -94,23 +94,23 @@ message(STATUS "Binary dir: ${CMAKE_BINARY_DIR}")
 message(STATUS "Assets will be copied to: ${ASSETS_OUTPUT_DIR}")
 
 # Verify source assets exist
-if(EXISTS "${CMAKE_SOURCE_DIR}/OBJ_models/")
-    message(STATUS "✓ Found OBJ_models directory")
+if(EXISTS "${CMAKE_SOURCE_DIR}/OBJ_Models/")
+    message(STATUS "Found OBJ_Models directory")
 else()
-    message(WARNING "✗ OBJ_models directory not found at source!")
+    message(WARNING "OBJ_Models directory not found at source")
 endif()
 
 if(EXISTS "${CMAKE_SOURCE_DIR}/Skyboxes/")
-    message(STATUS "✓ Found Skyboxes directory") 
+    message(STATUS "Found Skyboxes directory")
 else()
-    message(WARNING "✗ Skyboxes directory not found at source!")
+    message(WARNING "Skyboxes directory not found at source")
 endif()
 
 # Optional: Create a custom target to copy assets during build
 add_custom_target(copy_assets ALL
     COMMAND ${CMAKE_COMMAND} -E copy_directory
-        "${CMAKE_SOURCE_DIR}/OBJ_models"
-        "${ASSETS_OUTPUT_DIR}/OBJ_models"
+        "${CMAKE_SOURCE_DIR}/OBJ_Models"
+        "${ASSETS_OUTPUT_DIR}/OBJ_Models"
     COMMAND ${CMAKE_COMMAND} -E copy_directory
         "${CMAKE_SOURCE_DIR}/Skyboxes"
         "${ASSETS_OUTPUT_DIR}/Skyboxes"
