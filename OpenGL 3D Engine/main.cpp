@@ -6,9 +6,7 @@
 //
 
 /* TO-DO LIST
- 
- 1. Add face culling system choices for each submesh
- 
+ 1. Add conical lights
  */
 
 // OpenGL internal
@@ -27,6 +25,8 @@
 #include <vector>
 #include <unordered_set>
 #include <unordered_map>
+#include <filesystem>
+#include <cmath>
 
 // GLM library
 #include <glm/glm.hpp>
@@ -220,6 +220,47 @@ GLuint loadTexture(const std::string& path) {
     return textureID;
 }
 
+GLuint loadCubemap(const char* faces[6]) {
+    GLuint textureID;
+    glGenTextures(1, &textureID);
+    glBindTexture(GL_TEXTURE_CUBE_MAP, textureID);
+
+    int width, height, channels;
+    for (unsigned int i = 0; i < 6; i++) {
+        unsigned char* data = stbi_load(faces[i], &width, &height, &channels, 0);
+        if (!data) {
+            printf("Failed to load cubemap texture: %s\n", faces[i]);
+            return default_texture_id;
+        }
+        GLenum internalFormat, dataFormat;
+        if (channels == 1) {
+            internalFormat = GL_R8;
+            dataFormat = GL_RED;
+        } else if (channels == 3) {
+            internalFormat = GL_RGB8;
+            dataFormat = GL_RGB;
+        } else if (channels == 4) {
+            internalFormat = GL_RGBA8;
+            dataFormat = GL_RGBA;
+        } else {
+            stbi_image_free(data);
+            return default_texture_id;
+        }
+        glTexImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + i, 0, internalFormat, width, height, 0, dataFormat, GL_UNSIGNED_BYTE, data);
+        stbi_image_free(data);
+        printf("Successfully loaded cubemap texture piece: %s (%dx%d, %d channels)\n", faces[i], width, height, channels);
+    }
+    
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+    glGenerateMipmap(GL_TEXTURE_CUBE_MAP);
+    
+    return textureID;
+}
+
 // ============================================================================
 // LIGHTING SYSTEM
 // ============================================================================
@@ -232,7 +273,7 @@ typedef struct {
 
 std::vector<Light> lights;
 
-void createLightSource(glm::vec3 position, glm::vec3 color, float intensity) {
+void createOmniDirLight(glm::vec3 position, glm::vec3 color, float intensity) {
     Light light;
     light.position = position;
     light.color = color;
@@ -244,8 +285,13 @@ void createLightSource(glm::vec3 position, glm::vec3 color, float intensity) {
 // MESH SYSTEM
 // ============================================================================
 
-typedef struct { float u, v; } Vec2;
-typedef enum { CULL_NONE = 0, CULL_BACK = 1, CULL_FRONT = 2 } CullMode;
+typedef struct {
+    float u, v;
+} Vec2;
+
+typedef enum {
+    CULL_NONE = 0, CULL_BACK = 1, CULL_FRONT = 2
+} CullMode;
 
 class Mesh {
 public:
@@ -259,12 +305,10 @@ public:
     GLuint VAO, VBO, EBO;
     GLuint texture_id;
     Material material;
-    CullMode cull_mode;
+    int cull_mode;
     bool is_cleaned_up;
     
-    Mesh() : vertex_count(0), index_count(0), TRIANGLE_COUNT(0),
-             VAO(0), VBO(0), EBO(0), texture_id(0),
-             cull_mode(CULL_BACK), is_cleaned_up(false) {
+    Mesh() : vertex_count(0), index_count(0), TRIANGLE_COUNT(0), VAO(0), VBO(0), EBO(0), texture_id(0), cull_mode(CULL_NONE), is_cleaned_up(false) {
         material = createDefaultMaterial();
         global_mesh_registry.insert(this);
     }
@@ -363,7 +407,7 @@ public:
 
 EntityManager entity_manager;
 
-void createEntity(const char* name, std::vector<Mesh*> meshes, glm::vec3 pos, glm::vec3 rotation, glm::vec3 scale) {
+void createEntity(const char* name, std::vector<Mesh*> meshes, glm::vec3 pos, glm::vec3 rotation, glm::vec3 scale, std::vector<int> cull_modes) {
     Entity entity;
     entity.name = name;
     entity.position = pos;
@@ -375,11 +419,20 @@ void createEntity(const char* name, std::vector<Mesh*> meshes, glm::vec3 pos, gl
     entity.active = 1;
     entity_manager.addEntity(entity);
     
+    // Apply cull modes for individual submeshes
+    for (size_t i = 0; i < meshes.size(); i++) {
+        if (meshes[i]) {
+            if (i < cull_modes.size()) {
+                // If specified use the given cull mode
+                meshes[i]->cull_mode = cull_modes[i];
+            }
+        }
+    }
+    
     unsigned int mesh_triangles = 0;
     for (Mesh* mesh : meshes) {
         if (mesh) mesh_triangles += mesh->TRIANGLE_COUNT;
     }
-    
     total_triangles += mesh_triangles;
     
     printf("Created entity '%s' with %zu submesh(es) (total triangles: %u)\n",
@@ -439,7 +492,7 @@ glm::mat4 camera_get_view_matrix(Camera* cam) {
 }
 
 // ============================================================================
-// SHADER SYSTEM
+// SHADER CLASS
 // ============================================================================
 
 class Shader {
@@ -486,15 +539,15 @@ public:
     }
     
     void setMat4(const std::string& name, const glm::mat4& value) const {
-        glUniformMatrix4fv(getUniformLocation(name), 1, GL_FALSE, value_ptr(value));
+        glUniformMatrix4fv(getUniformLocation(name), 1, GL_FALSE, glm::value_ptr(value));
     }
     
     void setMat3(const std::string& name, const glm::mat3& value) const {
-        glUniformMatrix3fv(getUniformLocation(name), 1, GL_FALSE, value_ptr(value));
+        glUniformMatrix3fv(getUniformLocation(name), 1, GL_FALSE, glm::value_ptr(value));
     }
     
     void setVec3(const std::string& name, const glm::vec3& value) const {
-        glUniform3fv(getUniformLocation(name), 1, value_ptr(value));
+        glUniform3fv(getUniformLocation(name), 1, glm::value_ptr(value));
     }
     
     void setInt(const std::string& name, int value) const {
@@ -575,7 +628,7 @@ private:
 };
 
 // ============================================================================
-// SHADER SOURCES
+// MAIN SHADERS
 // ============================================================================
 
 const std::string vertex_shader_source = R"(
@@ -651,14 +704,13 @@ void main() {
         
         // Diffuse
         float diff_intensity = max(dot(correctedNorm, lightDir), 0.0);
-        // Apply face_mask: Only light the 'front' side of the plane
         vec3 diffuse = diff_intensity * face_mask * materialDiffuse * lightColors[i];
 
         // Specular
         vec3 viewDir = normalize(viewPos - FragPos);
         vec3 halfwayDir = normalize(lightDir + viewDir);
         float spec_intensity = pow(max(dot(correctedNorm, halfwayDir), 0.0), materialShininess);
-        vec3 specular = spec_intensity * face_mask * materialSpecular * lightColors[i];
+        vec3 specular = spec_intensity * materialSpecular * lightColors[i];
 
         finalLighting += (ambient + diffuse + specular) * lightIntensities[i];
     }
@@ -666,6 +718,209 @@ void main() {
     FragColor = vec4(finalLighting, 1.0) * texColor * vertexColor;
 }
 )";
+
+// ============================================================================
+// SKYBOX SHADER CLASS
+// ============================================================================
+
+typedef struct {
+    unsigned int program;
+    int view_location;
+    int projection_location;
+    int skybox_location;
+} SkyboxShader;
+
+const char* skybox_vertex_shader = "#version 330 core\n"
+    "layout (location = 0) in vec3 aPos;\n"
+    "out vec3 TexCoords;\n"
+    "uniform mat4 projection;\n"
+    "uniform mat4 view;\n"
+    "void main() {\n"
+    "    TexCoords = aPos;\n"
+    "    vec4 pos = projection * view * vec4(aPos, 1.0);\n"
+    "    gl_Position = pos.xyww;\n" // Make skybox always at far plane
+    "}\0";
+
+const char* skybox_fragment_shader = "#version 330 core\n"
+    "out vec4 FragColor;\n"
+    "in vec3 TexCoords;\n"
+    "uniform samplerCube skybox;\n"
+    "void main() {\n"
+    "    FragColor = texture(skybox, TexCoords);\n"
+    "}\0";
+
+SkyboxShader create_skybox_shader() {
+    // Compile vertex shader
+    unsigned int vertexShader = glCreateShader(GL_VERTEX_SHADER);
+    glShaderSource(vertexShader, 1, &skybox_vertex_shader, NULL);
+    glCompileShader(vertexShader);
+    
+    int success;
+    char infoLog[512];
+    glGetShaderiv(vertexShader, GL_COMPILE_STATUS, &success);
+    if (!success) {
+        glGetShaderInfoLog(vertexShader, 512, NULL, infoLog);
+        printf("Skybox vertex shader compilation failed: %s\n", infoLog);
+    }
+
+    // Compile fragment shader
+    unsigned int fragmentShader = glCreateShader(GL_FRAGMENT_SHADER);
+    glShaderSource(fragmentShader, 1, &skybox_fragment_shader, NULL);
+    glCompileShader(fragmentShader);
+    
+    glGetShaderiv(fragmentShader, GL_COMPILE_STATUS, &success);
+    if (!success) {
+        glGetShaderInfoLog(fragmentShader, 512, NULL, infoLog);
+        printf("Skybox fragment shader compilation failed: %s\n", infoLog);
+    }
+
+    // Link shader program
+    unsigned int program = glCreateProgram();
+    glAttachShader(program, vertexShader);
+    glAttachShader(program, fragmentShader);
+    glLinkProgram(program);
+    
+    glGetProgramiv(program, GL_LINK_STATUS, &success);
+    if (!success) {
+        glGetProgramInfoLog(program, 512, NULL, infoLog);
+        printf("Skybox shader program linking failed: %s\n", infoLog);
+    }
+
+    glDeleteShader(vertexShader);
+    glDeleteShader(fragmentShader);
+
+    SkyboxShader shader;
+    shader.program = program;
+    shader.view_location = glGetUniformLocation(program, "view");
+    shader.projection_location = glGetUniformLocation(program, "projection");
+    shader.skybox_location = glGetUniformLocation(program, "skybox");
+
+    return shader;
+}
+
+// ============================================================================
+// SKYBOX CLASS
+// ============================================================================
+
+static const float SKYBOX_VERTICES[] = {
+    // Positions
+    -1.0f,  1.0f, -1.0f,
+    -1.0f, -1.0f, -1.0f,
+     1.0f, -1.0f, -1.0f,
+     1.0f, -1.0f, -1.0f,
+     1.0f,  1.0f, -1.0f,
+    -1.0f,  1.0f, -1.0f,
+
+    -1.0f, -1.0f,  1.0f,
+    -1.0f, -1.0f, -1.0f,
+    -1.0f,  1.0f, -1.0f,
+    -1.0f,  1.0f, -1.0f,
+    -1.0f,  1.0f,  1.0f,
+    -1.0f, -1.0f,  1.0f,
+
+     1.0f, -1.0f, -1.0f,
+     1.0f, -1.0f,  1.0f,
+     1.0f,  1.0f,  1.0f,
+     1.0f,  1.0f,  1.0f,
+     1.0f,  1.0f, -1.0f,
+     1.0f, -1.0f, -1.0f,
+
+    -1.0f, -1.0f,  1.0f,
+    -1.0f,  1.0f,  1.0f,
+     1.0f,  1.0f,  1.0f,
+     1.0f,  1.0f,  1.0f,
+     1.0f, -1.0f,  1.0f,
+    -1.0f, -1.0f,  1.0f,
+
+    -1.0f,  1.0f, -1.0f,
+     1.0f,  1.0f, -1.0f,
+     1.0f,  1.0f,  1.0f,
+     1.0f,  1.0f,  1.0f,
+    -1.0f,  1.0f,  1.0f,
+    -1.0f,  1.0f, -1.0f,
+
+    -1.0f, -1.0f, -1.0f,
+    -1.0f, -1.0f,  1.0f,
+     1.0f, -1.0f, -1.0f,
+     1.0f, -1.0f, -1.0f,
+    -1.0f, -1.0f,  1.0f,
+     1.0f, -1.0f,  1.0f
+};
+
+class Skybox {
+public:
+    GLuint VAO, VBO;
+    GLuint cubemap_texture;
+    SkyboxShader shader;
+    
+    Skybox() : VAO(0), VBO(0), cubemap_texture(0) {}
+    
+    ~Skybox() {
+        cleanup();
+    }
+    
+    void init(const char* faces[6]) {
+        // Load cubemap texture
+        cubemap_texture = loadCubemap(faces);
+        
+        // Create shader
+        shader = create_skybox_shader();
+        
+        // Set up vertex data
+        glGenVertexArrays(1, &VAO);
+        glGenBuffers(1, &VBO);
+        
+        glBindVertexArray(VAO);
+        glBindBuffer(GL_ARRAY_BUFFER, VBO);
+        glBufferData(GL_ARRAY_BUFFER, sizeof(SKYBOX_VERTICES), &SKYBOX_VERTICES, GL_STATIC_DRAW);
+        
+        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)0);
+        glEnableVertexAttribArray(0);
+        
+        glBindVertexArray(0);
+    }
+    
+    void render(Camera* camera) {
+        // Change depth function so depth test passes when values are equal to depth buffer's content
+        glDepthFunc(GL_LEQUAL);
+        
+        glUseProgram(shader.program);
+        
+        // Remove translation from the view matrix (only keep rotation)
+        glm::mat4 view = camera_get_view_matrix(camera);
+        // Zero out the translation part (4th column)
+        view[3][0] = 0.0f;
+        view[3][1] = 0.0f;
+        view[3][2] = 0.0f;
+        
+        glm::mat4 projection = camera_get_projection(camera);
+        
+        glUniformMatrix4fv(shader.view_location, 1, GL_FALSE, glm::value_ptr(view));
+        glUniformMatrix4fv(shader.projection_location, 1, GL_FALSE, glm::value_ptr(projection));
+        
+        // Bind skybox texture
+        glBindVertexArray(VAO);
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_CUBE_MAP, cubemap_texture);
+        glUniform1i(shader.skybox_location, 0);
+        
+        glDrawArrays(GL_TRIANGLES, 0, 36);
+        glBindVertexArray(0);
+        
+        // Set depth function back to default
+        glDepthFunc(GL_LESS);
+    }
+    
+    void cleanup() {
+        if (VAO != 0) glDeleteVertexArrays(1, &VAO);
+        if (VBO != 0) glDeleteBuffers(1, &VBO);
+        if (cubemap_texture != 0) glDeleteTextures(1, &cubemap_texture);
+        if (shader.program != 0) glDeleteProgram(shader.program);
+        
+        VAO = VBO = cubemap_texture = 0;
+        shader.program = 0;
+    }
+};
 
 // ============================================================================
 // RENDERER CLASS
@@ -707,18 +962,33 @@ public:
             return;
         }
         
+        // Switch between cull modes
+        switch (mesh->cull_mode) {
+            case CULL_NONE:
+                glDisable(GL_CULL_FACE);
+                break;
+            case CULL_BACK:
+                glEnable(GL_CULL_FACE);
+                glCullFace(GL_BACK);
+                break;
+            case CULL_FRONT:
+                glEnable(GL_CULL_FACE);
+                glCullFace(GL_FRONT);
+                break;
+        }
+        
         main_shader->use();
         
         // Calculate matrices
-        glm::mat4 scale_matrix = scale(glm::mat4(1.0f), entity->scale);
-        glm::mat4 rotation_x = rotate(glm::mat4(1.0f), glm::radians(entity->rotation.x), glm::vec3(1.0f, 0.0f, 0.0f));
-        glm::mat4 rotation_y = rotate(glm::mat4(1.0f), glm::radians(entity->rotation.y), glm::vec3(0.0f, 1.0f, 0.0f));
-        glm::mat4 rotation_z = rotate(glm::mat4(1.0f), glm::radians(entity->rotation.z), glm::vec3(0.0f, 0.0f, 1.0f));
+        glm::mat4 scale_matrix = glm::scale(glm::mat4(1.0f), entity->scale);
+        glm::mat4 rotation_x = glm::rotate(glm::mat4(1.0f), glm::radians(entity->rotation.x), glm::vec3(1.0f, 0.0f, 0.0f));
+        glm::mat4 rotation_y = glm::rotate(glm::mat4(1.0f), glm::radians(entity->rotation.y), glm::vec3(0.0f, 1.0f, 0.0f));
+        glm::mat4 rotation_z = glm::rotate(glm::mat4(1.0f), glm::radians(entity->rotation.z), glm::vec3(0.0f, 0.0f, 1.0f));
         glm::mat4 rotation = rotation_z * rotation_y * rotation_x;
-        glm::mat4 translation = translate(glm::mat4(1.0f), entity->position);
+        glm::mat4 translation = glm::translate(glm::mat4(1.0f), entity->position);
                 
         glm::mat4 model = translation * rotation * scale_matrix;
-        glm::mat3 normal = transpose(inverse(glm::mat3(model)));
+        glm::mat3 normal = glm::transpose(glm::inverse(glm::mat3(model)));
         
         // Set uniforms
         main_shader->setMat4("model", model);
@@ -1063,7 +1333,7 @@ int main() {
     // Initialize camera
     global_camera = create_camera(static_cast<float>(window_width) / static_cast<float>(window_height));
     camera_update_vectors(&global_camera);
-        
+    
     // Z buffer
     glEnable(GL_DEPTH_TEST);
     glDepthFunc(GL_LESS);
@@ -1074,13 +1344,37 @@ int main() {
     glEnable(GL_MULTISAMPLE);
     
     // ============================================================================
-    // CREATE SCENE OBJECTS
+    // LOAD ASSETS
     // ============================================================================
+    
+    // LOAD SKYBOXES //
+    
+    // Cloud skybox
+    std::string cloud_skybox_paths[6] = {
+        buildAssetPath("Skyboxes/Cloud_skybox/cloud_skybox_right.png"),   // GL_TEXTURE_CUBE_MAP_POSITIVE_X
+        buildAssetPath("Skyboxes/Cloud_skybox/cloud_skybox_left.png"),    // GL_TEXTURE_CUBE_MAP_NEGATIVE_X
+        buildAssetPath("Skyboxes/Cloud_skybox/cloud_skybox_top.png"),     // GL_TEXTURE_CUBE_MAP_POSITIVE_Y
+        buildAssetPath("Skyboxes/Cloud_skybox/cloud_skybox_bottom.png"),  // GL_TEXTURE_CUBE_MAP_NEGATIVE_Y
+        buildAssetPath("Skyboxes/Cloud_skybox/cloud_skybox_front.png"),   // GL_TEXTURE_CUBE_MAP_POSITIVE_Z
+        buildAssetPath("Skyboxes/Cloud_skybox/cloud_skybox_back.png")     // GL_TEXTURE_CUBE_MAP_NEGATIVE_Z
+    };
+    
+    const char* cloud_skybox[6] = {
+        cloud_skybox_paths[0].c_str(),
+        cloud_skybox_paths[1].c_str(),
+        cloud_skybox_paths[2].c_str(),
+        cloud_skybox_paths[3].c_str(),
+        cloud_skybox_paths[4].c_str(),
+        cloud_skybox_paths[5].c_str()
+    };
+    
+    Skybox skybox;
+    skybox.init(cloud_skybox);
     
     // CREATE LIGHT SOURCES //
     
-    createLightSource(glm::vec3(0, 10, 0), glm::vec3(1, 1, 1), 1.0f);
-        
+    createOmniDirLight(glm::vec3(0, 10, 0), glm::vec3(1, 1, 1), 1.0f);
+    
     // LOAD OBJ MESHES //
     
     std::vector<Mesh*> level_mesh = loadOBJMesh(buildAssetPath("OBJ_Models/Level/level.obj"));
@@ -1088,12 +1382,17 @@ int main() {
     std::vector<Mesh*> instructions_mesh = loadOBJMesh(buildAssetPath("OBJ_Models/Instructions_Panel/quad.obj"));
     std::vector<Mesh*> cube_mesh = loadOBJMesh(buildAssetPath("OBJ_Models/Cube/cube.obj"));
     
-    // CREATE ENTITIES //
+    // ============================================================================
+    // CREATE SCENE OBJECTS
+    // ============================================================================
     
-    createEntity("level", level_mesh, glm::vec3(0, 0, 0), glm::vec3(0, 0, 0), glm::vec3(10, 10, 10));
-    createEntity("tree", tree_mesh, glm::vec3(0, 0, 0), glm::vec3(0, 0, 0), glm::vec3(1, 1, 1));
-    createEntity("instructions", instructions_mesh, glm::vec3(0, 2, 4), glm::vec3(0, 0, 0), glm::vec3(1, 1, 1));
-    createEntity("cube", cube_mesh, glm::vec3(5, 3, 0), glm::vec3(0, 0, 0), glm::vec3(1, 1, 1));
+    // Assign cull modes to each submesh
+    std::vector<int> tree_cull_modes = {CULL_NONE, CULL_BACK};
+    
+    createEntity("level", level_mesh, glm::vec3(0, 0, 0), glm::vec3(0, 0, 0), glm::vec3(10, 10, 10), std::vector<int> {CULL_NONE});
+    createEntity("tree", tree_mesh, glm::vec3(0, 0, 0), glm::vec3(0, 0, 0), glm::vec3(1, 1, 1), tree_cull_modes);
+    createEntity("instructions", instructions_mesh, glm::vec3(0, 2, 4), glm::vec3(0, 0, 0), glm::vec3(1, 1, 1), std::vector<int> {CULL_NONE});
+    createEntity("cube", cube_mesh, glm::vec3(5, 3, 0), glm::vec3(0, 0, 0), glm::vec3(1, 1, 1), std::vector<int> {CULL_BACK});
     
     printf("Total triangles: %d\n", total_triangles);
     printf("Active entities: %zu\n", entity_manager.size());
@@ -1113,7 +1412,7 @@ int main() {
             // ============================================================================
             
             // UPDATE LIGHTS
-            // lights[0].position = global_camera.position;
+            lights[0].position = global_camera.position;
             
             // UPDATE OBJECTS
             entity_manager.updateEntity("cube", VEC3_NO_CHANGE, glm::vec3(update_count, update_count * 0.5f, 0), VEC3_NO_CHANGE);
@@ -1159,7 +1458,7 @@ int main() {
             }
             
             if (glm::length(cam_offset) > 0.0f) {
-                cam_offset = normalize(cam_offset);
+                cam_offset = glm::normalize(cam_offset);
             }
             global_camera.position = global_camera.position + cam_offset * camera_speed;
             
@@ -1172,6 +1471,8 @@ int main() {
         glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         
+        // Render skybox first
+        skybox.render(&global_camera);
         
         // Render all entities
         for (size_t i = 0; i < entity_manager.size(); i++) {
@@ -1204,6 +1505,7 @@ int main() {
     
     printf("Cleaning up...\n");
     cleanup_all_meshes();
+    skybox.cleanup();
     
     if (default_texture_id != 0) {
         glDeleteTextures(1, &default_texture_id);
