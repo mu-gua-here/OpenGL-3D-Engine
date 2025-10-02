@@ -5,18 +5,23 @@
 //  Created by Ray Hsiao Muguang on 2025/9/15.
 //
 
-/* TO-DO LIST
+/*
+ 
+ IMPLEMENTATION LIST
  1. Add conical lights
- 2. Add shadow mapping
- 3. Add collision detection
- 4. Add PBR maps
- 5. Physics (maybe)
- 6. Add entity instancing & batching
- 7. Optimisations
+ 2. Add collision detection
+ 3. Add PBR maps
+ 4. Physics (maybe)
+ 5. Add entity instancing & batching
+ 6. Optimisations
     a. Batching
     b. Instancing
     c. Frustum culling
     d. LOD
+ 
+ BUGS / IMPROVEMENTS LIST
+ 1. Entity deletion optimization (memory leaks are present in code) -> use
+ 
  */
 
 // OpenGL internal
@@ -35,8 +40,13 @@
 #include <vector>
 #include <unordered_set>
 #include <unordered_map>
-#include <filesystem>
 #include <cmath>
+
+// Filesystem access
+#include <filesystem>
+#ifdef __APPLE__
+    #include <mach-o/dyld.h>
+#endif
 
 // GLM library
 #include <glm/glm.hpp>
@@ -74,8 +84,8 @@ unsigned int entity_count = 0;
 // Shadow mapping
 GLuint shadowMapFBO = 0;
 GLuint shadowMapTexture = 0;
-const unsigned int SHADOW_WIDTH = 2048;
-const unsigned int SHADOW_HEIGHT = 2048;
+const unsigned int SHADOW_WIDTH = 1024;
+const unsigned int SHADOW_HEIGHT = 1024;
 glm::mat4 lightSpaceMatrix;
 
 // Game settings
@@ -117,12 +127,31 @@ void updateFPS(GLFWwindow* window) {
 // ============================================================================
 
 std::string getProjectRoot() {
-    std::filesystem::path exe_path = std::filesystem::current_path();
+    std::filesystem::path exe_path;
+    
+    #ifdef __APPLE__
+        char path[1024];
+        uint32_t size = sizeof(path);
+        if (_NSGetExecutablePath(path, &size) == 0) {
+            exe_path = std::filesystem::canonical(path).parent_path();
+        } else {
+            exe_path = std::filesystem::current_path();
+        }
+    #else
+        exe_path = std::filesystem::current_path();
+    #endif
+    
     std::filesystem::path project_root = exe_path;
     
+    // Search upward for OBJ_Models directory (will find source directory)
     while (!std::filesystem::exists(project_root / "OBJ_Models") &&
            project_root != project_root.parent_path()) {
         project_root = project_root.parent_path();
+    }
+    
+    if (!std::filesystem::exists(project_root / "OBJ_Models")) {
+        printf("ERROR: Could not find OBJ_Models directory!\n");
+        printf("Searched up from: %s\n", exe_path.string().c_str());
     }
     
     return project_root.string();
@@ -185,7 +214,7 @@ GLuint createDefaultTexture() {
     glGenTextures(1, &texture_id);
     glBindTexture(GL_TEXTURE_2D, texture_id);
     
-    constexpr unsigned char white_pixel[4] = {255, 255, 255, 255};
+    const unsigned char white_pixel[4] = {255, 255, 255, 255};
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 1, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, white_pixel);
     
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
@@ -246,7 +275,7 @@ GLuint loadCubemap(const char* faces[6]) {
     for (unsigned int i = 0; i < 6; i++) {
         unsigned char* data = stbi_load(faces[i], &width, &height, &channels, 0);
         if (!data) {
-            printf("Failed to load cubemap texture: %s\n", faces[i]);
+            printf("Failed to load cubemap texture piece: %s\n", faces[i]);
             return default_texture_id;
         }
         GLenum internalFormat, dataFormat;
@@ -436,8 +465,32 @@ public:
         return nullptr;
     }
     
-    void compactEntities() {
-        // Remove inactive entities
+    void removeEntity(size_t index) {
+        if (index >= entities.size() || !active_flags[index]) return;
+        
+        Entity& entity = entities[index];
+        
+        // Subtract from triangle count
+        for (Mesh* mesh : entity.meshes) {
+            if (mesh) {
+                total_triangles -= mesh->TRIANGLE_COUNT;
+            }
+        }
+        
+        // Clear the mesh references (but don't delete the meshes themselves)
+        entity.meshes.clear();
+        
+        // Mark as inactive
+        active_flags[index] = false;
+    }
+
+    void removeEntity(const std::string& name) {
+        for (size_t i = 0; i < entities.size(); i++) {
+            if (active_flags[i] && entities[i].name == name) {
+                removeEntity(i);
+                return;
+            }
+        }
     }
 };
 
@@ -459,8 +512,12 @@ void createEntity(std::string name, std::vector<Mesh*> meshes, glm::vec3 pos, gl
     for (size_t i = 0; i < meshes.size(); i++) {
         if (meshes[i]) {
             if (i < cull_modes.size()) {
-                // If specified use the given cull mode
-                meshes[i]->cull_mode = cull_modes[i];
+                // If specified use the given cull mode, otherwise use CULL_NONE
+                if (cull_modes[i]) {
+                    meshes[i]->cull_mode = cull_modes[i];
+                } else {
+                    meshes[i]->cull_mode = CULL_NONE;
+                }
             }
         }
     }
@@ -471,7 +528,7 @@ void createEntity(std::string name, std::vector<Mesh*> meshes, glm::vec3 pos, gl
     }
     total_triangles += mesh_triangles;
     
-    printf("Created entity '%s' with %zu submesh(es) (total triangles: %u)\n",
+    printf("Created entity '%s' with %zu submesh(es) (triangles: %u)\n",
            name.c_str(), meshes.size(), mesh_triangles);
 }
 
@@ -487,12 +544,13 @@ typedef struct {
 
 std::vector<Light> lights;
 
-void createOmniDirLight(glm::vec3 position, glm::vec3 color, float intensity) {
+void createOmniDirLight(glm::vec3 position, glm::vec3 color, float intensity, std::vector<Mesh*> light_mesh) {
     Light light;
     light.position = position;
     light.color = color;
     light.intensity = intensity;
     lights.push_back(light);
+    createEntity("light", light_mesh, position, glm::vec3(0, 0, 0), glm::vec3(0.5f, 0.5f, 0.5f), std::vector<int> {CULL_BACK});
 }
 
 // ============================================================================
@@ -533,10 +591,10 @@ void camera_update_vectors(Camera* cam) {
     cam->front.x = cos(glm::radians(cam->yaw)) * cos(glm::radians(cam->pitch));
     cam->front.y = sin(glm::radians(cam->pitch));
     cam->front.z = sin(glm::radians(cam->yaw)) * cos(glm::radians(cam->pitch));
-    cam->front = normalize(cam->front);
+    cam->front = glm::normalize(cam->front);
 
-    cam->right = normalize(cross(cam->front, glm::vec3(0, 1, 0)));
-    cam->up = normalize(cross(cam->right, cam->front));
+    cam->right = glm::normalize(cross(cam->front, glm::vec3(0, 1, 0)));
+    cam->up = glm::normalize(cross(cam->right, cam->front));
 }
 
 glm::mat4 camera_get_projection(Camera* cam) {
@@ -752,8 +810,7 @@ float ShadowCalculation(vec4 fragPosLightSpace, vec3 normal, vec3 lightDir) {
     projCoords = projCoords * 0.5 + 0.5;
     
     // Check if fragment is outside light's view frustum
-    if(projCoords.z > 1.0)
-        return 0.0;
+    if (projCoords.z > 1.0) return 0.0;
     
     // Get closest depth value from light's perspective
     float closestDepth = texture(shadowMap, projCoords.xy).r;
@@ -762,17 +819,18 @@ float ShadowCalculation(vec4 fragPosLightSpace, vec3 normal, vec3 lightDir) {
     float currentDepth = projCoords.z;
     
     // Apply bias to prevent shadow acne
-    float bias = max(0.005 * (1.0 - dot(normal, lightDir)), 0.0005);
+    float bias = max(0.01 * (1.0 - dot(normal, lightDir)), 0.0001);
     
     // PCF for soft shadows
     float shadow = 0.0;
     vec2 texelSize = 1.0 / textureSize(shadowMap, 0);
-    for(int x = -1; x <= 1; ++x) {
-        for(int y = -1; y <= 1; ++y) {
+    for (int x = -1; x <= 1; ++x) {
+        for (int y = -1; y <= 1; ++y) {
             float pcfDepth = texture(shadowMap, projCoords.xy + vec2(x, y) * texelSize).r;
             shadow += currentDepth - bias > pcfDepth ? 1.0 : 0.0;
         }
     }
+    // Find per fragment weight for the nine fragments
     shadow /= 9.0;
     
     return shadow;
@@ -781,9 +839,7 @@ float ShadowCalculation(vec4 fragPosLightSpace, vec3 normal, vec3 lightDir) {
 void main() {
     vec4 texColor = texture(u_texture, TexCoord);
     
-    if (texColor.a < 0.1) {
-        discard;
-    }
+    if (texColor.a < 0.5) discard;
     
     vec3 norm = normalize(Normal);
     vec3 finalLighting = vec3(0.0);
@@ -794,8 +850,10 @@ void main() {
     }
 
     for (int i = 0; i < lightCount && i < MAX_LIGHTS; i++) {
+        // Ambient
         vec3 ambient = materialAmbient * lightColors[i];
         
+        // Diffuse
         vec3 lightDir = normalize(lightPositions[i] - FragPos);
 
         float shadow = 0.0;
@@ -811,7 +869,8 @@ void main() {
         if (dot(normSpec, lightDir) < 0.0) {
             normSpec = -normSpec;
         }
-
+        
+        // Specular
         vec3 viewDir = normalize(viewPos - FragPos);
         vec3 halfwayDir = normalize(lightDir + viewDir);
         float spec_intensity = pow(max(dot(normSpec, halfwayDir), 0.0), materialShininess);
@@ -854,24 +913,37 @@ void main() {
 )";
 
 // ============================================================================
-// SHADOW MAPPING SHADER
+// SHADOWMAP SHADER
 // ============================================================================
 
 const std::string shadow_vertex_shader = R"(
 #version 330 core
 layout (location = 0) in vec3 aPos;
+layout (location = 2) in vec2 aTexCoords;
 
 uniform mat4 lightSpaceMatrix;
 uniform mat4 model;
 
+out vec2 TexCoord;
+
 void main() {
     gl_Position = lightSpaceMatrix * model * vec4(aPos, 1.0);
+    TexCoord = aTexCoords;
 }
 )";
 
 const std::string shadow_fragment_shader = R"(
 #version 330 core
+
+in vec2 TexCoord;
+
+uniform sampler2D u_texture;
+
 void main() {
+    vec4 texColor = texture(u_texture, TexCoord);
+    if (texColor.a < 0.5) {
+        discard; // Prevents the fragment from writing to the depth buffer
+    }
     // Depth is automatically written
 }
 )";
@@ -938,8 +1010,15 @@ public:
     }
     
     void init(const char* faces[6]) {
+        try {
+            skybox_shader = std::make_unique<Shader>(skybox_vertex_shader, skybox_fragment_shader);
+            printf("Skybox shaders created successfully. %u\n", skybox_shader->getProgram());
+        } catch (const std::exception& e) {
+            printf("Failed to create skybox shaders: %s\n", e.what());
+            throw;
+        }
+        
         cubemap_texture = loadCubemap(faces);
-        skybox_shader = std::make_unique<Shader>(skybox_vertex_shader, skybox_fragment_shader);
         
         glGenVertexArrays(1, &VAO);
         glGenBuffers(1, &VBO);
@@ -1004,7 +1083,7 @@ public:
         try {
             main_shader = std::make_unique<Shader>(main_vertex_shader, main_fragment_shader);
             shadow_shader = std::make_unique<Shader>(shadow_vertex_shader, shadow_fragment_shader);
-            printf("Shaders created successfully. Main: %u, Shadow: %u",
+            printf("Shaders created successfully. Main: %u, Shadow: %u\n",
                    main_shader->getProgram(), shadow_shader->getProgram());
         } catch (const std::exception& e) {
             printf("Failed to create shaders: %s\n", e.what());
@@ -1013,22 +1092,38 @@ public:
     }
     
     void renderShadowPass(EntityManager& entity_manager, const Light& light) {
-        // Save current viewport
         GLint viewport[4];
         glGetIntegerv(GL_VIEWPORT, viewport);
         
         glViewport(0, 0, SHADOW_WIDTH, SHADOW_HEIGHT);
         glBindFramebuffer(GL_FRAMEBUFFER, shadowMapFBO);
         glClear(GL_DEPTH_BUFFER_BIT);
-        
-        // Front face culling to reduce peter panning
         glCullFace(GL_FRONT);
         
-        // Calculate light space matrix
         glm::vec3 lightPos = light.position;
-        glm::vec3 lightTarget = glm::vec3(0.0f, 0.0f, 0.0f); // Look at origin
-        glm::mat4 lightProjection = glm::ortho(-50.0f, 50.0f, -50.0f, 50.0f, 0.1f, 100.0f);
-        glm::mat4 lightView = glm::lookAt(lightPos, lightTarget, glm::vec3(0.0f, 1.0f, 0.0f));
+        
+        // Look at scene center or camera
+        glm::vec3 lightTarget = glm::vec3(0.0f, 0.0f, 0.0f);
+        
+        // Calculate light direction
+        glm::vec3 lightDir = glm::normalize(lightTarget - lightPos);
+        
+        // Choose up vector dynamically
+        glm::vec3 up;
+        if (abs(lightDir.y) > 0.99f) {
+            // Light is pointing nearly straight up or down
+            // Use X axis as up vector instead
+            up = glm::vec3(1.0f, 0.0f, 0.0f);
+        } else {
+            // Normal case: use Y axis as up
+            up = glm::vec3(0.0f, 1.0f, 0.0f);
+        }
+        
+        // Perspective projection for point lights
+        glm::mat4 lightProjection = glm::perspective(glm::radians(90.0f), 1.0f, 0.5f, 100.0f);
+        
+        glm::mat4 lightView = glm::lookAt(lightPos, lightTarget, up);
+        
         lightSpaceMatrix = lightProjection * lightView;
         
         shadow_shader->use();
@@ -1040,7 +1135,6 @@ public:
             if (entity && entity->active) {
                 for (Mesh* mesh : entity->meshes) {
                     if (mesh && mesh->isValid()) {
-                        // Calculate model matrix
                         glm::mat4 scale_matrix = glm::scale(glm::mat4(1.0f), entity->scale);
                         glm::mat4 rotation_x = glm::rotate(glm::mat4(1.0f), glm::radians(entity->rotation.x), glm::vec3(1.0f, 0.0f, 0.0f));
                         glm::mat4 rotation_y = glm::rotate(glm::mat4(1.0f), glm::radians(entity->rotation.y), glm::vec3(0.0f, 1.0f, 0.0f));
@@ -1051,6 +1145,12 @@ public:
                         
                         shadow_shader->setMat4("model", model);
                         
+                        // Bind texture for shadow shaders to test alpha values in texture
+                        GLuint texture_to_use = (mesh->texture_id != 0) ? mesh->texture_id : default_texture_id;
+                        glActiveTexture(GL_TEXTURE0);
+                        glBindTexture(GL_TEXTURE_2D, texture_to_use);
+                        shadow_shader->setInt("u_texture", 0);
+                        
                         glBindVertexArray(mesh->VAO);
                         glDrawElements(GL_TRIANGLES, mesh->INDEX_COUNT, GL_UNSIGNED_INT, 0);
                     }
@@ -1059,8 +1159,8 @@ public:
         }
         
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
-        // Restore previous viewport
         glViewport(viewport[0], viewport[1], viewport[2], viewport[3]);
+        glCullFace(GL_BACK);
     }
     
     void drawEntity(Entity* entity, const Camera& camera, const std::vector<Light>& lights, int shadowLightIndex) {
@@ -1259,10 +1359,19 @@ std::vector<Mesh*> loadOBJWithMTL(const std::string& obj_path) {
         } else if (token == "usemtl") {
             ss >> current_material_name;
         } else if (token == "f") {
-            std::string v1_str, v2_str, v3_str, v4_str;
-            ss >> v1_str >> v2_str >> v3_str >> v4_str;
+            // Read all vertices in the face (handles n-gons)
+            std::vector<std::string> face_vertices;
+            std::string vertex_str;
+            while (ss >> vertex_str) {
+                face_vertices.push_back(vertex_str);
+            }
 
-            // Process first triangle of face
+            // Need at least 3 vertices for a triangle
+            if (face_vertices.size() < 3) {
+                printf("Warning: Face with less than 3 vertices, skipping\n");
+                continue;
+            }
+
             auto process_vertex = [&](const std::string& v_str, const std::string& mat_name) {
                 std::stringstream v_ss(v_str);
                 std::string v, vt, vn;
@@ -1270,14 +1379,46 @@ std::vector<Mesh*> loadOBJWithMTL(const std::string& obj_path) {
                 std::getline(v_ss, vt, '/');
                 std::getline(v_ss, vn, '/');
 
+                // Safety check for empty vertex index
+                if (v.empty()) return;
+                
                 int v_idx = std::stoi(v) - 1;
-                int vt_idx = std::stoi(vt) - 1;
-                int vn_idx = std::stoi(vn) - 1;
+                
+                // Only parse texture coordinate if it exists
+                int vt_idx = -1;
+                if (!vt.empty()) {
+                    vt_idx = std::stoi(vt) - 1;
+                }
+                
+                // Only parse normal if it exists
+                int vn_idx = -1;
+                if (!vn.empty()) {
+                    vn_idx = std::stoi(vn) - 1;
+                }
+
+                // Bounds check
+                if (v_idx < 0 || v_idx >= (int)temp_vertices.size()) {
+                    printf("Warning: Vertex index %d out of range\n", v_idx + 1);
+                    return;
+                }
 
                 Vertex vertex;
                 vertex.position = temp_vertices[v_idx];
-                vertex.texcoord = temp_texcoords[vt_idx];
-                vertex.normal = temp_normals[vn_idx];
+                
+                // Use texture coordinate if valid, otherwise use default
+                if (vt_idx >= 0 && vt_idx < (int)temp_texcoords.size()) {
+                    vertex.texcoord = temp_texcoords[vt_idx];
+                } else {
+                    vertex.texcoord = glm::vec2(0.0f, 0.0f);
+                }
+                
+                // Use normal if valid, otherwise use default
+                if (vn_idx >= 0 && vn_idx < (int)temp_normals.size()) {
+                    vertex.normal = temp_normals[vn_idx];
+                } else {
+                    vertex.normal = glm::vec3(0.0f, 1.0f, 0.0f);
+                }
+                
                 vertex.color = materials[mat_name].diffuse_color.toVec4();
 
                 auto& v_map = vertex_to_index[mat_name];
@@ -1291,16 +1432,13 @@ std::vector<Mesh*> loadOBJWithMTL(const std::string& obj_path) {
 
                 inds.push_back(v_map[vertex]);
             };
-
-            process_vertex(v1_str, current_material_name);
-            process_vertex(v2_str, current_material_name);
-            process_vertex(v3_str, current_material_name);
-            if (!v4_str.empty()) {
-                process_vertex(v1_str, current_material_name);
-                process_vertex(v3_str, current_material_name);
-                process_vertex(v4_str, current_material_name);
+            
+            // Fan triangulation: convert n-gon to triangles
+            for (size_t i = 1; i < face_vertices.size() - 1; i++) {
+                process_vertex(face_vertices[0], current_material_name);     // First vertex (pivot)
+                process_vertex(face_vertices[i], current_material_name);     // Current vertex
+                process_vertex(face_vertices[i + 1], current_material_name); // Next vertex
             }
-
         }
     }
 
@@ -1387,13 +1525,24 @@ void loadMTL(const std::string& mtl_path, std::unordered_map<std::string, Materi
 }
 
 std::vector<Mesh*> loadOBJMesh(const std::string& obj_path) {
-    std::vector<Mesh*> meshes = loadOBJWithMTL(obj_path);
+    const std::string& full_obj_path = buildAssetPath("OBJ_Models/" + obj_path);
+    if (!std::filesystem::exists(full_obj_path)) {
+        std::cerr << "ERROR::OBJ_LOAD::File does not exist: " << full_obj_path << std::endl;
+        
+        // File is missing or permission denied
+        std::cerr << "Check your file path or OS file permissions." << std::endl;
+        
+        // Return empty mesh
+        return {};
+    }
+    
+    std::vector<Mesh*> meshes = loadOBJWithMTL(full_obj_path);
 
     if (meshes.empty()) {
-        std::cerr << "Failed to load OBJ file: " << obj_path << std::endl;
+        std::cerr << "Failed to load OBJ file: " << full_obj_path << std::endl;
         return {};
     } else {
-        std::cerr << "Successfully loaded OBJ file: " << obj_path << std::endl;
+        std::cerr << "Successfully loaded OBJ file: " << full_obj_path << std::endl;
     }
 
     entity_count++;
@@ -1502,16 +1651,15 @@ int main() {
     
     // LOAD OBJ MESHES //
     
-    // Note that when importing new assets you only need to add your files to the main assets folders (not the duplicated folders)
-    // The program automatically updates the duplicated files (the ones under the build folder) for you
+    // Note that when importing new assets you only need to add your files to the main assets folders
     // You can find the main asset folders at "OpenGL 3D Engine/OpenGL 3D Engine/OBJ_Models" or "OpenGL 3D Engine/OpenGL 3D Engine/Skyboxes"
     
-    std::vector<Mesh*> level_mesh = loadOBJMesh(buildAssetPath("OBJ_Models/Level/level.obj"));
-    std::vector<Mesh*> tree_mesh = loadOBJMesh(buildAssetPath("OBJ_Models/Realistic_tree/tree.obj"));
-    std::vector<Mesh*> instructions_mesh = loadOBJMesh(buildAssetPath("OBJ_Models/Instructions_Panel/quad.obj"));
-    std::vector<Mesh*> cube_mesh = loadOBJMesh(buildAssetPath("OBJ_Models/Cube/cube.obj"));
-    std::vector<Mesh*> sphere_mesh = loadOBJMesh(buildAssetPath("OBJ_Models/Sphere/sphere.obj"));
-    // std::vector<Mesh*> fence_mesh = loadOBJMesh(buildAssetPath("OBJ_Models/Wooden_fence/wooden_fence.obj"));
+    std::vector<Mesh*> level_mesh = loadOBJMesh("Level/level.obj");
+    std::vector<Mesh*> tree_mesh = loadOBJMesh("Realistic_tree/tree.obj");
+    std::vector<Mesh*> instructions_mesh = loadOBJMesh("Instructions_Panel/quad.obj");
+    std::vector<Mesh*> cube_mesh = loadOBJMesh("Cube/cube.obj");
+    std::vector<Mesh*> sphere_mesh = loadOBJMesh("Sphere/sphere.obj");
+    std::vector<Mesh*> streetlight_mesh = loadOBJMesh("Streetlight/streetlight.obj");
     
     // ============================================================================
     // CREATE SCENE OBJECTS
@@ -1519,19 +1667,16 @@ int main() {
     
     // CREATE LIGHT SOURCES //
     
-    createOmniDirLight(glm::vec3(0, 10, 0), glm::vec3(1, 1, 1), 1.0f);
+    createOmniDirLight(glm::vec3(0, 10, 0), glm::vec3(1, 1, 1), 1.0f, sphere_mesh);
     
     // CREATE ENTITIES //
-    
-    // Assign cull modes to each submesh
-    std::vector<int> tree_cull_modes = {CULL_NONE, CULL_BACK};
-    
+        
     createEntity("level", level_mesh, glm::vec3(0, 0, 0), glm::vec3(0, 0, 0), glm::vec3(10, 10, 10), std::vector<int> {CULL_NONE});
-    createEntity("tree", tree_mesh, glm::vec3(0, 0, 0), glm::vec3(0, 0, 0), glm::vec3(1, 1, 1), tree_cull_modes);
+    createEntity("tree", tree_mesh, glm::vec3(0, 0, 0), glm::vec3(0, 0, 0), glm::vec3(1, 1, 1), std::vector<int>{CULL_NONE, CULL_BACK});
     createEntity("instructions", instructions_mesh, glm::vec3(0, 2, 4), glm::vec3(0, 0, 0), glm::vec3(1, 1, 1), std::vector<int> {CULL_NONE});
     createEntity("cube", cube_mesh, glm::vec3(5, 3, 0), glm::vec3(0, 0, 0), glm::vec3(1, 1, 1), std::vector<int> {CULL_BACK});
     createEntity("sphere", sphere_mesh, glm::vec3(0, 2, -5), glm::vec3(0, 0, 0), glm::vec3(1, 1, 1), std::vector<int> {CULL_BACK});
-    // createEntity("fence", fence_mesh, glm::vec3(0, 0, 0), glm::vec3(0, 0, 0), glm::vec3(1, 1, 1), std::vector<int> {CULL_NONE});
+    createEntity("streetlight", streetlight_mesh, glm::vec3(-5, 0.05, 0), glm::vec3(0, 0, 0), glm::vec3(1, 1, 1), std::vector<int> {CULL_BACK});
     
     printf("Total triangles: %d\n", total_triangles);
     printf("Active entities: %zu\n", entity_manager.size());
@@ -1555,6 +1700,7 @@ int main() {
             
             // UPDATE OBJECTS
             entity_manager.updateEntity("cube", VEC3_NO_CHANGE, glm::vec3(update_count, update_count * 0.5f, 0), VEC3_NO_CHANGE);
+            entity_manager.updateEntity("sphere", glm::vec3(0, 2.5 + sinf(update_count * 0.01f), -5), glm::vec3(update_count, 0, 0), VEC3_NO_CHANGE);
             
             update_count += speed_multiplier;
             
