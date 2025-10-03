@@ -8,12 +8,11 @@
 /*
  
  IMPLEMENTATION LIST
- 1. Add conical lights
- 2. Add collision detection
- 3. Add PBR maps
- 4. Physics (maybe)
- 5. Add entity instancing & batching
- 6. Optimisations
+ 1. Add collision detection
+ 2. Add PBR maps
+ 3. Physics (maybe)
+ 4. Add entity instancing & batching
+ 5. Optimisations
     a. Batching
     b. Instancing
     c. Frustum culling
@@ -64,8 +63,8 @@ void framebuffer_size_callback(GLFWwindow* window, int width, int height);
 // ============================================================================
 
 // Window
-int window_width = 800;
-int window_height = 600;
+int WINDOW_WIDTH = 800;
+int WINDOW_HEIGHT = 600;
 
 // Runtime
 bool firstMouse = true;
@@ -84,8 +83,8 @@ unsigned int entity_count = 0;
 // Shadow mapping
 GLuint shadowMapFBO = 0;
 GLuint shadowMapTexture = 0;
-const unsigned int SHADOW_WIDTH = 1024;
-const unsigned int SHADOW_HEIGHT = 1024;
+const unsigned int SHADOW_WIDTH = 4096;
+const unsigned int SHADOW_HEIGHT = 4096;
 glm::mat4 lightSpaceMatrix;
 
 // Game settings
@@ -183,25 +182,52 @@ public:
     glm::vec4 toVec4() const { return glm::vec4(r, g, b, a); }
 };
 
+// Material class with PBR texture support
 class Material {
 public:
     std::string name;
+    
+    // PBR properties
+    glm::vec3 base_color{1.0f, 1.0f, 1.0f};  // Used if no albedo map
+    float metallic = 1.0f;                    // Used if no metallic map
+    float roughness = 0.5f;                   // Used if no roughness map
+    glm::vec3 emissive{0.0f, 0.0f, 0.0f};    // Used if no emissive map
+    
+    // Texture IDs - 0 means "not present"
+    GLuint albedo_map = 0;      // Base color texture
+    GLuint normal_map = 0;      // Normal/bump map
+    GLuint metallic_map = 0;    // Metallic values
+    GLuint roughness_map = 0;   // Roughness values
+    GLuint ao_map = 0;          // Ambient occlusion
+    GLuint emissive_map = 0;    // Self-illumination
+    
+    // For metallic-roughness combined textures (common in glTF)
+    GLuint metallic_roughness_map = 0;  // R = unused, G = roughness, B = metallic
+    
+    // Legacy texture (for backward compatibility with your current code)
     GLuint texture_id = 0;
     Color diffuse_color;
-    glm::vec3 ambient{0.1f, 0.1f, 0.1f};
-    glm::vec3 diffuse{0.8f, 0.8f, 0.8f};
-    glm::vec3 specular{0.5f, 0.5f, 0.5f};
-    float shininess = 32.0f;
-    
+        
     Material() = default;
     Material(const std::string& name) : name(name) {}
+    
+    // Check if a specific map is present
+    bool hasAlbedoMap() const { return albedo_map != 0; }
+    bool hasNormalMap() const { return normal_map != 0; }
+    bool hasMetallicMap() const { return metallic_map != 0; }
+    bool hasRoughnessMap() const { return roughness_map != 0; }
+    bool hasAOMap() const { return ao_map != 0; }
+    bool hasEmissiveMap() const { return emissive_map != 0; }
+    bool hasMetallicRoughnessMap() const { return metallic_roughness_map != 0; }
 };
 
 Material createDefaultMaterial() {
     Material default_mat;
     default_mat.name = "default";
     default_mat.texture_id = default_texture_id;
+    default_mat.albedo_map = default_texture_id;  // PBR fallback
     default_mat.diffuse_color = {1.0f, 1.0f, 1.0f, 1.0f};
+    default_mat.base_color = {1.0f, 1.0f, 1.0f};
     return default_mat;
 }
 
@@ -338,7 +364,7 @@ void initShadowMap() {
     }
     
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
-    printf("Shadow map initialized (%dx%d)\n", SHADOW_WIDTH, SHADOW_HEIGHT);
+    printf("Shadowmap initialized (%dx%d)\n", SHADOW_WIDTH, SHADOW_HEIGHT);
 }
 
 void cleanupShadowMap() {
@@ -540,17 +566,19 @@ typedef struct {
     glm::vec3 position;
     glm::vec3 color;
     float intensity;
+    std::string entity_name;
 } Light;
 
 std::vector<Light> lights;
 
-void createOmniDirLight(glm::vec3 position, glm::vec3 color, float intensity, std::vector<Mesh*> light_mesh) {
+void createPointLight(std::string name, glm::vec3 position, glm::vec3 color, float intensity, std::vector<Mesh*> light_mesh, glm::vec3 scale, glm::vec3 mesh_offset, std::vector<int> cull_mode) {
     Light light;
     light.position = position;
     light.color = color;
     light.intensity = intensity;
+    light.entity_name = name;
     lights.push_back(light);
-    createEntity("light", light_mesh, position, glm::vec3(0, 0, 0), glm::vec3(0.5f, 0.5f, 0.5f), std::vector<int> {CULL_BACK});
+    createEntity(light.entity_name, light_mesh, position + mesh_offset, glm::vec3(0, 0, 0), scale, cull_mode);
 }
 
 // ============================================================================
@@ -742,22 +770,25 @@ private:
 };
 
 // ============================================================================
-// MAIN SHADER
+// PBR VERTEX SHADER
 // ============================================================================
 
-const std::string main_vertex_shader = R"(
+const std::string pbr_vertex_shader = R"(
 #version 330 core
 
 layout (location = 0) in vec3 aPos;
 layout (location = 1) in vec4 aColor;
 layout (location = 2) in vec2 aTexCoords;
 layout (location = 3) in vec3 aNormal;
+layout (location = 4) in vec3 aTangent;
+layout (location = 5) in vec3 aBitangent;
 
 out vec4 vertexColor;
 out vec2 TexCoord;
 out vec3 FragPos;
 out vec3 Normal;
 out vec4 FragPosLightSpace;
+out mat3 TBN;  // Tangent-Bitangent-Normal matrix for normal mapping
 
 uniform mat4 model;
 uniform mat4 view;
@@ -772,10 +803,20 @@ void main() {
     TexCoord = aTexCoords;
     vertexColor = aColor;
     FragPosLightSpace = lightSpaceMatrix * vec4(FragPos, 1.0);
+    
+    // Construct TBN matrix for normal mapping
+    vec3 T = normalize(vec3(model * vec4(aTangent, 0.0)));
+    vec3 B = normalize(vec3(model * vec4(aBitangent, 0.0)));
+    vec3 N = normalize(vec3(model * vec4(aNormal, 0.0)));
+    TBN = mat3(T, B, N);
 }
 )";
 
-const std::string main_fragment_shader = R"(
+// ============================================================================
+// PBR FRAGMENT SHADER (Cook-Torrance BRDF)
+// ============================================================================
+
+const std::string pbr_fragment_shader = R"(
 #version 330 core
 
 in vec4 vertexColor;
@@ -783,12 +824,34 @@ in vec2 TexCoord;
 in vec3 FragPos;
 in vec3 Normal;
 in vec4 FragPosLightSpace;
+in mat3 TBN;
 
 out vec4 FragColor;
 
-uniform sampler2D u_texture;
+// Textures
+uniform sampler2D albedoMap;
+uniform sampler2D normalMap;
+uniform sampler2D metallicMap;
+uniform sampler2D roughnessMap;
+uniform sampler2D aoMap;
+uniform sampler2D emissiveMap;
 uniform sampler2D shadowMap;
 
+// Material properties (used if maps are not present)
+uniform vec3 baseColor;
+uniform float metallic;
+uniform float roughness;
+uniform vec3 emissive;
+
+// Texture presence flags
+uniform bool hasAlbedoMap;
+uniform bool hasNormalMap;
+uniform bool hasMetallicMap;
+uniform bool hasRoughnessMap;
+uniform bool hasAOMap;
+uniform bool hasEmissiveMap;
+
+// Lighting
 #define MAX_LIGHTS 16
 uniform vec3 lightPositions[MAX_LIGHTS];
 uniform vec3 lightColors[MAX_LIGHTS];
@@ -797,31 +860,72 @@ uniform int lightCount;
 uniform vec3 viewPos;
 uniform int shadowLightIndex;
 
-uniform vec3 materialAmbient;
-uniform vec3 materialDiffuse;
-uniform vec3 materialSpecular;
-uniform float materialShininess;
+const float PI = 3.14159265359;
+
+// Normal Distribution Function (GGX/Trowbridge-Reitz)
+// Determines how much the surface's microfacets are aligned with the halfway vector
+float DistributionGGX(vec3 N, vec3 H, float roughness) {
+    float a = roughness * roughness;
+    float a2 = a * a;
+    float NdotH = max(dot(N, H), 0.0);
+    float NdotH2 = NdotH * NdotH;
+    
+    float num = a2;
+    float denom = (NdotH2 * (a2 - 1.0) + 1.0);
+    denom = PI * denom * denom;
+    
+    return num / denom;
+}
+
+// Geometry Function (Schlick-GGX)
+// Describes self-shadowing of microfacets
+float GeometrySchlickGGX(float NdotV, float roughness) {
+    float r = (roughness + 1.0);
+    float k = (r * r) / 8.0;
+    
+    float num = NdotV;
+    float denom = NdotV * (1.0 - k) + k;
+    
+    return num / denom;
+}
+
+// Smith's method for geometry obstruction
+float GeometrySmith(vec3 N, vec3 V, vec3 L, float roughness) {
+    float NdotV = max(dot(N, V), 0.0);
+    float NdotL = max(dot(N, L), 0.0);
+    float ggx2 = GeometrySchlickGGX(NdotV, roughness);
+    float ggx1 = GeometrySchlickGGX(NdotL, roughness);
+    
+    return ggx1 * ggx2;
+}
+
+// Fresnel-Schlick Approximation
+vec3 fresnelSchlick(float cosTheta, vec3 F0) {
+    return F0 + (1.0 - F0) * pow(clamp(1.0 - cosTheta, 0.0, 1.0), 5.0);
+}
 
 float ShadowCalculation(vec4 fragPosLightSpace, vec3 normal, vec3 lightDir) {
-    // Perform perspective divide
     vec3 projCoords = fragPosLightSpace.xyz / fragPosLightSpace.w;
-    
-    // Transform to [0,1] range
     projCoords = projCoords * 0.5 + 0.5;
     
-    // Check if fragment is outside light's view frustum
-    if (projCoords.z > 1.0) return 0.0;
+    if (projCoords.z > 1.0) return 1.0;
     
-    // Get closest depth value from light's perspective
+    vec2 edgeDistance = min(projCoords.xy, 1.0 - projCoords.xy);
+    float minEdgeDist = min(edgeDistance.x, edgeDistance.y);
+    float fadeStart = 0.15;
+    float edgeFade = smoothstep(0.0, fadeStart, minEdgeDist);
+    
+    if (projCoords.x < 0.0 || projCoords.x > 1.0 || 
+        projCoords.y < 0.0 || projCoords.y > 1.0) {
+        return 1.0;
+    }
+    
+    if (edgeFade < 0.01) return 1.0;
+    
     float closestDepth = texture(shadowMap, projCoords.xy).r;
-    
-    // Get depth of current fragment from light's perspective
     float currentDepth = projCoords.z;
+    float bias = max(0.00005 * (1.0 - dot(normal, lightDir)), 0.0005);
     
-    // Apply bias to prevent shadow acne
-    float bias = max(0.01 * (1.0 - dot(normal, lightDir)), 0.0001);
-    
-    // PCF for soft shadows
     float shadow = 0.0;
     vec2 texelSize = 1.0 / textureSize(shadowMap, 0);
     for (int x = -1; x <= 1; ++x) {
@@ -830,63 +934,125 @@ float ShadowCalculation(vec4 fragPosLightSpace, vec3 normal, vec3 lightDir) {
             shadow += currentDepth - bias > pcfDepth ? 1.0 : 0.0;
         }
     }
-    // Find per fragment weight for the nine fragments
     shadow /= 9.0;
+    shadow = mix(1.0, shadow, edgeFade);
     
     return shadow;
 }
 
 void main() {
-    vec4 texColor = texture(u_texture, TexCoord);
+    vec4 texColor = texture(albedoMap, TexCoord);
     
     if (texColor.a < 0.5) discard;
     
-    vec3 norm = normalize(Normal);
-    vec3 finalLighting = vec3(0.0);
+    // Sample textures
+    vec3 albedo = hasAlbedoMap ? texture(albedoMap, TexCoord).rgb : baseColor;
+    float metallicValue = hasMetallicMap ? texture(metallicMap, TexCoord).r : metallic;
+    float roughnessValue = hasRoughnessMap ? texture(roughnessMap, TexCoord).r : roughness;
+    float ao = hasAOMap ? texture(aoMap, TexCoord).r : 1.0;
+    vec3 emissiveValue = hasEmissiveMap ? texture(emissiveMap, TexCoord).rgb : emissive;
     
-    vec3 view_norm_corrected = norm;
-    if (!gl_FrontFacing) {
-        view_norm_corrected = -norm;
+    // Get normal from normal map or use vertex normal
+    vec3 N;
+    if (hasNormalMap) {
+        // Sample normal map and transform from [0,1] to [-1,1]
+        N = texture(normalMap, TexCoord).rgb;
+        N = N * 2.0 - 1.0;
+        N = normalize(TBN * N);  // Transform to world space
+    } else {
+        N = normalize(Normal);
     }
-
+    
+    vec3 V = normalize(viewPos - FragPos);
+    
+    // Calculate reflectance at normal incidence (F0)
+    // For dielectrics (non-metals), F0 is typically 0.04
+    // For metals, F0 is the albedo color
+    vec3 F0 = vec3(0.04);
+    F0 = mix(F0, albedo, metallicValue);
+    
+    // Reflectance equation
+    vec3 Lo = vec3(0.0);
+    
     for (int i = 0; i < lightCount && i < MAX_LIGHTS; i++) {
-        // Ambient
-        vec3 ambient = materialAmbient * lightColors[i];
+        // Calculate per-light radiance
+        vec3 L = normalize(lightPositions[i] - FragPos);
+        vec3 H = normalize(V + L);
+        float distance = length(lightPositions[i] - FragPos);
+        float attenuation = 1.0 / (distance * distance);
+        vec3 radiance = lightColors[i] * lightIntensities[i] * attenuation;
         
-        // Diffuse
-        vec3 lightDir = normalize(lightPositions[i] - FragPos);
-
+        // Cook-Torrance BRDF
+        float NDF = DistributionGGX(N, H, roughnessValue);
+        float G = GeometrySmith(N, V, L, roughnessValue);
+        vec3 F = fresnelSchlick(max(dot(H, V), 0.0), F0);
+        
+        vec3 kS = F;  // Specular contribution
+        vec3 kD = vec3(1.0) - kS;  // Diffuse contribution
+        kD *= 1.0 - metallicValue;  // Metals have no diffuse
+        
+        vec3 numerator = NDF * G * F;
+        float denominator = 4.0 * max(dot(N, V), 0.0) * max(dot(N, L), 0.0) + 0.0001;
+        vec3 specular = numerator / denominator;
+        
+        // Add to outgoing radiance Lo
+        float NdotL = max(dot(N, L), 0.0);
+        
+        // Apply shadows for the shadow-casting light
         float shadow = 0.0;
         if (i == shadowLightIndex) {
-            shadow = ShadowCalculation(FragPosLightSpace, norm, lightDir);
+            shadow = ShadowCalculation(FragPosLightSpace, N, L);
         }
         
-        float normal_light_corrected = dot(view_norm_corrected, lightDir);
-        float diff_intensity = max(normal_light_corrected, 0.0); 
-        vec3 diffuse = diff_intensity * materialDiffuse * lightColors[i];
-                
-        vec3 normSpec = view_norm_corrected;
-        if (dot(normSpec, lightDir) < 0.0) {
-            normSpec = -normSpec;
-        }
-        
-        // Specular
-        vec3 viewDir = normalize(viewPos - FragPos);
-        vec3 halfwayDir = normalize(lightDir + viewDir);
-        float spec_intensity = pow(max(dot(normSpec, halfwayDir), 0.0), materialShininess);
-        
-        float face_mask = gl_FrontFacing ? 1.0 : 0.0;
-        vec3 specular = spec_intensity * face_mask * materialSpecular * lightColors[i];
-        
-        finalLighting += (ambient + (1.0 - shadow) * (diffuse + specular)) * lightIntensities[i];
+        Lo += (kD * albedo / PI + specular) * radiance * NdotL * (1.0 - shadow);
     }
-
-    FragColor = vec4(finalLighting, 1.0) * texColor * vertexColor;
+    
+    // Ambient lighting
+    vec3 ambient = vec3(0.03) * albedo * ao;
+    
+    vec3 color = ambient + Lo + emissiveValue;
+    
+    // HDR tonemapping (Reinhard)
+    color = color / (color + vec3(1.0));
+    
+    // Gamma correction
+    color = pow(color, vec3(1.0/2.2));
+    
+    FragColor = vec4(color, 1.0);
 }
 )";
 
 // ============================================================================
-// SKYBOX SHADER
+// UNLIT SHADERS
+// ============================================================================
+
+const std::string unlit_vertex_shader = R"(
+#version 330 core
+layout (location = 0) in vec3 aPos;
+
+uniform mat4 model;
+uniform mat4 view;
+uniform mat4 projection;
+
+void main() {
+    gl_Position = projection * view * model * vec4(aPos, 1.0);
+}
+)";
+
+const std::string unlit_fragment_shader = R"(
+#version 330 core
+out vec4 FragColor;
+
+uniform vec3 emissiveColor;
+uniform float emissiveIntensity;
+
+void main() {
+    FragColor = vec4(emissiveColor * emissiveIntensity, 1.0);
+}
+)";
+
+// ============================================================================
+// SKYBOX SHADERS
 // ============================================================================
 
 const std::string skybox_vertex_shader = R"(
@@ -913,7 +1079,7 @@ void main() {
 )";
 
 // ============================================================================
-// SHADOWMAP SHADER
+// SHADOWMAP SHADERS
 // ============================================================================
 
 const std::string shadow_vertex_shader = R"(
@@ -1075,16 +1241,18 @@ public:
 
 class Renderer {
 private:
-    std::unique_ptr<Shader> main_shader;
+    std::unique_ptr<Shader> pbr_shader;
     std::unique_ptr<Shader> shadow_shader;
+    std::unique_ptr<Shader> unlit_shader;
     
 public:
     Renderer() {
         try {
-            main_shader = std::make_unique<Shader>(main_vertex_shader, main_fragment_shader);
+            pbr_shader = std::make_unique<Shader>(pbr_vertex_shader, pbr_fragment_shader);
             shadow_shader = std::make_unique<Shader>(shadow_vertex_shader, shadow_fragment_shader);
-            printf("Shaders created successfully. Main: %u, Shadow: %u\n",
-                   main_shader->getProgram(), shadow_shader->getProgram());
+            unlit_shader = std::make_unique<Shader>(unlit_vertex_shader, unlit_fragment_shader);
+            printf("Shaders created successfully. Main: %u, Shadow: %u, Unlit: %u\n",
+                   pbr_shader->getProgram(), shadow_shader->getProgram(), unlit_shader->getProgram());
         } catch (const std::exception& e) {
             printf("Failed to create shaders: %s\n", e.what());
             throw;
@@ -1098,7 +1266,6 @@ public:
         glViewport(0, 0, SHADOW_WIDTH, SHADOW_HEIGHT);
         glBindFramebuffer(GL_FRAMEBUFFER, shadowMapFBO);
         glClear(GL_DEPTH_BUFFER_BIT);
-        glCullFace(GL_FRONT);
         
         glm::vec3 lightPos = light.position;
         
@@ -1133,8 +1300,25 @@ public:
         for (size_t i = 0; i < entity_manager.size(); i++) {
             Entity* entity = entity_manager.getEntityAt(i);
             if (entity && entity->active) {
+                bool is_light_entity = false;
+                for (const auto& light : lights) {
+                    if (entity->name == light.entity_name) {
+                        is_light_entity = true;
+                        break;
+                    }
+                }
+                if (is_light_entity) {
+                    continue;  // Skip rendering this entity in shadow pass
+                }
                 for (Mesh* mesh : entity->meshes) {
                     if (mesh && mesh->isValid()) {
+                        // Apply mesh-specific culling
+                        if (mesh->cull_mode == CULL_NONE) {
+                            glDisable(GL_CULL_FACE);  // Disable culling for thin objects
+                        } else {
+                            glEnable(GL_CULL_FACE);
+                            glCullFace(GL_FRONT);     // Keep front-face culling for solid objects
+                        }
                         glm::mat4 scale_matrix = glm::scale(glm::mat4(1.0f), entity->scale);
                         glm::mat4 rotation_x = glm::rotate(glm::mat4(1.0f), glm::radians(entity->rotation.x), glm::vec3(1.0f, 0.0f, 0.0f));
                         glm::mat4 rotation_y = glm::rotate(glm::mat4(1.0f), glm::radians(entity->rotation.y), glm::vec3(0.0f, 1.0f, 0.0f));
@@ -1167,9 +1351,7 @@ public:
         if (!entity->active) return;
         
         for (Mesh* mesh : entity->meshes) {
-            if (mesh && mesh->isValid()) {
-                drawMesh(entity, mesh, camera, lights, shadowLightIndex);
-            }
+            drawMesh(entity, mesh, camera, lights, shadowLightIndex);
         }
     }
     
@@ -1183,6 +1365,7 @@ public:
             return;
         }
         
+        // Handle culling
         switch (mesh->cull_mode) {
             case CULL_NONE:
                 glDisable(GL_CULL_FACE);
@@ -1197,7 +1380,133 @@ public:
                 break;
         }
         
-        main_shader->use();
+        pbr_shader->use();
+        
+        // Calculate matrices
+        glm::mat4 scale_matrix = glm::scale(glm::mat4(1.0f), entity->scale);
+        glm::mat4 rotation_x = glm::rotate(glm::mat4(1.0f), glm::radians(entity->rotation.x),
+                                           glm::vec3(1.0f, 0.0f, 0.0f));
+        glm::mat4 rotation_y = glm::rotate(glm::mat4(1.0f), glm::radians(entity->rotation.y),
+                                           glm::vec3(0.0f, 1.0f, 0.0f));
+        glm::mat4 rotation_z = glm::rotate(glm::mat4(1.0f), glm::radians(entity->rotation.z),
+                                           glm::vec3(0.0f, 0.0f, 1.0f));
+        glm::mat4 rotation = rotation_z * rotation_y * rotation_x;
+        glm::mat4 translation = glm::translate(glm::mat4(1.0f), entity->position);
+        glm::mat4 model = translation * rotation * scale_matrix;
+        glm::mat3 normal = glm::transpose(glm::inverse(glm::mat3(model)));
+        
+        // Set uniforms
+        pbr_shader->setMat4("model", model);
+        pbr_shader->setMat4("view", view);
+        pbr_shader->setMat4("projection", projection);
+        pbr_shader->setMat3("normalMatrix", normal);
+        pbr_shader->setMat4("lightSpaceMatrix", lightSpaceMatrix);
+        pbr_shader->setInt("shadowLightIndex", shadowLightIndex);
+        
+        // Set lighting
+        int light_count = std::min(static_cast<int>(lights.size()), MAX_LIGHTS);
+        pbr_shader->setInt("lightCount", light_count);
+        pbr_shader->setVec3("viewPos", camera.position);
+        
+        std::vector<glm::vec3> positions, colors;
+        std::vector<float> intensities;
+        
+        for (int i = 0; i < light_count; i++) {
+            positions.push_back(lights[i].position);
+            colors.push_back(lights[i].color);
+            intensities.push_back(lights[i].intensity * 1000.0f);
+        }
+        
+        pbr_shader->setVec3Array("lightPositions", positions);
+        pbr_shader->setVec3Array("lightColors", colors);
+        pbr_shader->setFloatArray("lightIntensities", intensities);
+        
+        // Set material properties (fallback values)
+        pbr_shader->setVec3("baseColor", mesh->material.base_color);
+        pbr_shader->setFloat("metallic", mesh->material.metallic);
+        pbr_shader->setFloat("roughness", mesh->material.roughness);
+        pbr_shader->setVec3("emissive", mesh->material.emissive);
+        
+        // Bind textures and set flags
+        int texture_unit = 0;
+        
+        // Albedo map
+        glActiveTexture(GL_TEXTURE0 + texture_unit);
+        GLuint albedo_to_use = mesh->material.hasAlbedoMap() ?
+        mesh->material.albedo_map : default_texture_id;
+        glBindTexture(GL_TEXTURE_2D, albedo_to_use);
+        pbr_shader->setInt("albedoMap", texture_unit);
+        pbr_shader->setInt("hasAlbedoMap", mesh->material.hasAlbedoMap());
+        texture_unit++;
+        
+        // Normal map
+        glActiveTexture(GL_TEXTURE0 + texture_unit);
+        GLuint normal_to_use = mesh->material.hasNormalMap() ?
+        mesh->material.normal_map : default_texture_id;
+        glBindTexture(GL_TEXTURE_2D, normal_to_use);
+        pbr_shader->setInt("normalMap", texture_unit);
+        pbr_shader->setInt("hasNormalMap", mesh->material.hasNormalMap());
+        texture_unit++;
+        
+        // Metallic map
+        glActiveTexture(GL_TEXTURE0 + texture_unit);
+        GLuint metallic_to_use = mesh->material.hasMetallicMap() ?
+        mesh->material.metallic_map : default_texture_id;
+        glBindTexture(GL_TEXTURE_2D, metallic_to_use);
+        pbr_shader->setInt("metallicMap", texture_unit);
+        pbr_shader->setInt("hasMetallicMap", mesh->material.hasMetallicMap());
+        texture_unit++;
+        
+        // Roughness map
+        glActiveTexture(GL_TEXTURE0 + texture_unit);
+        GLuint roughness_to_use = mesh->material.hasRoughnessMap() ?
+        mesh->material.roughness_map : default_texture_id;
+        glBindTexture(GL_TEXTURE_2D, roughness_to_use);
+        pbr_shader->setInt("roughnessMap", texture_unit);
+        pbr_shader->setInt("hasRoughnessMap", mesh->material.hasRoughnessMap());
+        texture_unit++;
+        
+        // AO map
+        glActiveTexture(GL_TEXTURE0 + texture_unit);
+        GLuint ao_to_use = mesh->material.hasAOMap() ?
+        mesh->material.ao_map : default_texture_id;
+        glBindTexture(GL_TEXTURE_2D, ao_to_use);
+        pbr_shader->setInt("aoMap", texture_unit);
+        pbr_shader->setInt("hasAOMap", mesh->material.hasAOMap());
+        texture_unit++;
+        
+        // Emissive map
+        glActiveTexture(GL_TEXTURE0 + texture_unit);
+        GLuint emissive_to_use = mesh->material.hasEmissiveMap() ?
+        mesh->material.emissive_map : default_texture_id;
+        glBindTexture(GL_TEXTURE_2D, emissive_to_use);
+        pbr_shader->setInt("emissiveMap", texture_unit);
+        pbr_shader->setInt("hasEmissiveMap", mesh->material.hasEmissiveMap());
+        texture_unit++;
+        
+        // Shadow map
+        glActiveTexture(GL_TEXTURE0 + texture_unit);
+        glBindTexture(GL_TEXTURE_2D, shadowMapTexture);
+        pbr_shader->setInt("shadowMap", texture_unit);
+        
+        // Draw
+        glBindVertexArray(mesh->VAO);
+        glDrawElements(GL_TRIANGLES, mesh->INDEX_COUNT, GL_UNSIGNED_INT, 0);
+        glBindVertexArray(0);
+        
+        // Reset to texture unit 0
+        glActiveTexture(GL_TEXTURE0);
+    }
+    
+    void drawUnlitMesh(Entity* entity, Mesh* mesh, const glm::vec3& color, float intensity = 1.0f) {
+        if (!entity->active || mesh->TRIANGLE_COUNT == 0 || !mesh->isValid()) {
+            return;
+        }
+        
+        // Disable culling for light spheres to ensure they're always visible
+        glDisable(GL_CULL_FACE);
+        
+        unlit_shader->use();
         
         // Calculate matrices
         glm::mat4 scale_matrix = glm::scale(glm::mat4(1.0f), entity->scale);
@@ -1207,55 +1516,20 @@ public:
         glm::mat4 rotation = rotation_z * rotation_y * rotation_x;
         glm::mat4 translation = glm::translate(glm::mat4(1.0f), entity->position);
         glm::mat4 model = translation * rotation * scale_matrix;
-        glm::mat3 normal = glm::transpose(glm::inverse(glm::mat3(model)));
         
         // Set uniforms
-        main_shader->setMat4("model", model);
-        main_shader->setMat4("view", view);
-        main_shader->setMat4("projection", projection);
-        main_shader->setMat3("normalMatrix", normal);
-        main_shader->setMat4("lightSpaceMatrix", lightSpaceMatrix);
-        main_shader->setInt("shadowLightIndex", shadowLightIndex);
-        
-        // Set lighting
-        int light_count = std::min(static_cast<int>(lights.size()), MAX_LIGHTS);
-        main_shader->setInt("lightCount", light_count);
-        main_shader->setVec3("viewPos", camera.position);
-        main_shader->setInt("shadowLightIndex", shadowLightIndex);
-        
-        std::vector<glm::vec3> positions, colors;
-        std::vector<float> intensities;
-        
-        for (int i = 0; i < light_count; i++) {
-            positions.push_back(lights[i].position);
-            colors.push_back(lights[i].color);
-            intensities.push_back(lights[i].intensity);
-        }
-        
-        main_shader->setVec3Array("lightPositions", positions);
-        main_shader->setVec3Array("lightColors", colors);
-        main_shader->setFloatArray("lightIntensities", intensities);
-        
-        // Set material
-        main_shader->setVec3("materialAmbient", mesh->material.ambient);
-        main_shader->setVec3("materialDiffuse", mesh->material.diffuse);
-        main_shader->setVec3("materialSpecular", mesh->material.specular);
-        main_shader->setFloat("materialShininess", mesh->material.shininess);
-        
-        // Set textures
-        GLuint texture_to_use = (mesh->texture_id != 0) ? mesh->texture_id : default_texture_id;
-        glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, texture_to_use);
-        main_shader->setInt("u_texture", 0);
-        
-        glActiveTexture(GL_TEXTURE1);
-        glBindTexture(GL_TEXTURE_2D, shadowMapTexture);
-        main_shader->setInt("shadowMap", 1);
+        unlit_shader->setMat4("model", model);
+        unlit_shader->setMat4("view", view);
+        unlit_shader->setMat4("projection", projection);
+        unlit_shader->setVec3("emissiveColor", color);
+        unlit_shader->setFloat("emissiveIntensity", intensity * 0.001);
         
         // Draw
         glBindVertexArray(mesh->VAO);
         glDrawElements(GL_TRIANGLES, mesh->INDEX_COUNT, GL_UNSIGNED_INT, 0);
         glBindVertexArray(0);
+        
+        glEnable(GL_CULL_FACE);
     }
 };
 
@@ -1265,17 +1539,22 @@ public:
 
 void loadMTL(const std::string& mtl_path, std::unordered_map<std::string, Material>& materials);
 
+// Updated Vertex structure with tangent and bitangent
 struct Vertex {
     glm::vec3 position;
     glm::vec4 color;
     glm::vec2 texcoord;
     glm::vec3 normal;
+    glm::vec3 tangent;
+    glm::vec3 bitangent;
 
     bool operator==(const Vertex& other) const {
         return position == other.position &&
                texcoord == other.texcoord &&
                normal == other.normal &&
-               color == other.color;
+               color == other.color &&
+               tangent == other.tangent &&
+               bitangent == other.bitangent;
     }
 };
 
@@ -1288,11 +1567,37 @@ namespace std {
                  ^ (hash<float>()(v.texcoord.y) << 3)
                  ^ (hash<float>()(v.normal.x) << 4)
                  ^ (hash<float>()(v.normal.y) << 5)
-                 ^ (hash<float>()(v.normal.z) << 6);
+                 ^ (hash<float>()(v.normal.z) << 6)
+                 ^ (hash<float>()(v.tangent.x) << 7)
+                 ^ (hash<float>()(v.tangent.y) << 8)
+                 ^ (hash<float>()(v.tangent.z) << 9);
         }
     };
 }
 
+// Function to calculate tangents and bitangents for a triangle
+void calculateTangentBitangent(
+    const glm::vec3& pos1, const glm::vec3& pos2, const glm::vec3& pos3,
+    const glm::vec2& uv1, const glm::vec2& uv2, const glm::vec2& uv3,
+    glm::vec3& tangent, glm::vec3& bitangent)
+{
+    glm::vec3 edge1 = pos2 - pos1;
+    glm::vec3 edge2 = pos3 - pos1;
+    glm::vec2 deltaUV1 = uv2 - uv1;
+    glm::vec2 deltaUV2 = uv3 - uv1;
+    
+    float f = 1.0f / (deltaUV1.x * deltaUV2.y - deltaUV2.x * deltaUV1.y);
+    
+    tangent.x = f * (deltaUV2.y * edge1.x - deltaUV1.y * edge2.x);
+    tangent.y = f * (deltaUV2.y * edge1.y - deltaUV1.y * edge2.y);
+    tangent.z = f * (deltaUV2.y * edge1.z - deltaUV1.y * edge2.z);
+    
+    bitangent.x = f * (-deltaUV2.x * edge1.x + deltaUV1.x * edge2.x);
+    bitangent.y = f * (-deltaUV2.x * edge1.y + deltaUV1.x * edge2.y);
+    bitangent.z = f * (-deltaUV2.x * edge1.z + deltaUV1.x * edge2.z);
+}
+
+// Updated loadOBJWithMTL function (replace your existing one)
 std::vector<Mesh*> loadOBJWithMTL(const std::string& obj_path) {
     std::ifstream file(obj_path);
     if (!file.is_open()) {
@@ -1320,13 +1625,12 @@ std::vector<Mesh*> loadOBJWithMTL(const std::string& obj_path) {
             std::string mtl_path = obj_dir + "/" + mtl_filename;
             
             loadMTL(mtl_path, materials);
-            break; // Only need the first mtllib line
+            break;
         }
     }
-    file.clear(); // Clear any error flags
-    file.seekg(0, std::ios::beg); // Rewind to the beginning of the file
+    file.clear();
+    file.seekg(0, std::ios::beg);
 
-    // If no materials were loaded, use a default material
     if (materials.empty()) {
         materials["default"] = createDefaultMaterial();
         current_material_name = "default";
@@ -1336,7 +1640,15 @@ std::vector<Mesh*> loadOBJWithMTL(const std::string& obj_path) {
     std::vector<glm::vec2> temp_texcoords;
     std::vector<glm::vec3> temp_normals;
     
-    std::unordered_map<std::string, std::vector<float>> vertices_by_material;
+    // Temporary storage for faces (we need to calculate tangents after all faces are loaded)
+    struct FaceVertex {
+        int v_idx, vt_idx, vn_idx;
+    };
+    struct Face {
+        std::vector<FaceVertex> vertices;
+        std::string material;
+    };
+    std::vector<Face> faces;
 
     // Second pass to load vertex data and faces
     while (std::getline(file, line)) {
@@ -1359,89 +1671,86 @@ std::vector<Mesh*> loadOBJWithMTL(const std::string& obj_path) {
         } else if (token == "usemtl") {
             ss >> current_material_name;
         } else if (token == "f") {
-            // Read all vertices in the face (handles n-gons)
-            std::vector<std::string> face_vertices;
+            Face face;
+            face.material = current_material_name;
+            
             std::string vertex_str;
             while (ss >> vertex_str) {
-                face_vertices.push_back(vertex_str);
-            }
-
-            // Need at least 3 vertices for a triangle
-            if (face_vertices.size() < 3) {
-                printf("Warning: Face with less than 3 vertices, skipping\n");
-                continue;
-            }
-
-            auto process_vertex = [&](const std::string& v_str, const std::string& mat_name) {
-                std::stringstream v_ss(v_str);
+                std::stringstream v_ss(vertex_str);
                 std::string v, vt, vn;
                 std::getline(v_ss, v, '/');
                 std::getline(v_ss, vt, '/');
                 std::getline(v_ss, vn, '/');
 
-                // Safety check for empty vertex index
-                if (v.empty()) return;
+                if (v.empty()) continue;
                 
-                int v_idx = std::stoi(v) - 1;
+                FaceVertex fv;
+                fv.v_idx = std::stoi(v) - 1;
+                fv.vt_idx = vt.empty() ? -1 : std::stoi(vt) - 1;
+                fv.vn_idx = vn.empty() ? -1 : std::stoi(vn) - 1;
                 
-                // Only parse texture coordinate if it exists
-                int vt_idx = -1;
-                if (!vt.empty()) {
-                    vt_idx = std::stoi(vt) - 1;
-                }
+                face.vertices.push_back(fv);
+            }
+            
+            if (face.vertices.size() >= 3) {
+                faces.push_back(face);
+            }
+        }
+    }
+    
+    // Now process faces and calculate tangents
+    for (const auto& face : faces) {
+        const std::string& mat_name = face.material;
+        
+        // Fan triangulation
+        for (size_t i = 1; i < face.vertices.size() - 1; i++) {
+            std::vector<Vertex> triangle_verts(3);
+            
+            // Build the three vertices of this triangle
+            std::vector<int> tri_indices = {0, (int)i, (int)i + 1};
+            
+            for (int j = 0; j < 3; j++) {
+                const FaceVertex& fv = face.vertices[tri_indices[j]];
                 
-                // Only parse normal if it exists
-                int vn_idx = -1;
-                if (!vn.empty()) {
-                    vn_idx = std::stoi(vn) - 1;
-                }
-
-                // Bounds check
-                if (v_idx < 0 || v_idx >= (int)temp_vertices.size()) {
-                    printf("Warning: Vertex index %d out of range\n", v_idx + 1);
-                    return;
-                }
-
-                Vertex vertex;
-                vertex.position = temp_vertices[v_idx];
+                if (fv.v_idx < 0 || fv.v_idx >= (int)temp_vertices.size()) continue;
                 
-                // Use texture coordinate if valid, otherwise use default
-                if (vt_idx >= 0 && vt_idx < (int)temp_texcoords.size()) {
-                    vertex.texcoord = temp_texcoords[vt_idx];
-                } else {
-                    vertex.texcoord = glm::vec2(0.0f, 0.0f);
-                }
+                triangle_verts[j].position = temp_vertices[fv.v_idx];
+                triangle_verts[j].texcoord = (fv.vt_idx >= 0 && fv.vt_idx < (int)temp_texcoords.size())
+                    ? temp_texcoords[fv.vt_idx] : glm::vec2(0.0f, 0.0f);
+                triangle_verts[j].normal = (fv.vn_idx >= 0 && fv.vn_idx < (int)temp_normals.size())
+                    ? temp_normals[fv.vn_idx] : glm::vec3(0.0f, 1.0f, 0.0f);
+                triangle_verts[j].color = materials[mat_name].diffuse_color.toVec4();
+            }
+            
+            // Calculate tangent and bitangent for this triangle
+            glm::vec3 tangent, bitangent;
+            calculateTangentBitangent(
+                triangle_verts[0].position, triangle_verts[1].position, triangle_verts[2].position,
+                triangle_verts[0].texcoord, triangle_verts[1].texcoord, triangle_verts[2].texcoord,
+                tangent, bitangent
+            );
+            
+            // Apply the same tangent/bitangent to all 3 vertices
+            for (int j = 0; j < 3; j++) {
+                triangle_verts[j].tangent = tangent;
+                triangle_verts[j].bitangent = bitangent;
                 
-                // Use normal if valid, otherwise use default
-                if (vn_idx >= 0 && vn_idx < (int)temp_normals.size()) {
-                    vertex.normal = temp_normals[vn_idx];
-                } else {
-                    vertex.normal = glm::vec3(0.0f, 1.0f, 0.0f);
-                }
-                
-                vertex.color = materials[mat_name].diffuse_color.toVec4();
-
+                // Add to mesh data
                 auto& v_map = vertex_to_index[mat_name];
                 auto& verts = unique_vertices[mat_name];
                 auto& inds = indices_by_material[mat_name];
 
-                if (v_map.count(vertex) == 0) {
-                    v_map[vertex] = static_cast<unsigned int>(verts.size());
-                    verts.push_back(vertex);
+                if (v_map.count(triangle_verts[j]) == 0) {
+                    v_map[triangle_verts[j]] = static_cast<unsigned int>(verts.size());
+                    verts.push_back(triangle_verts[j]);
                 }
 
-                inds.push_back(v_map[vertex]);
-            };
-            
-            // Fan triangulation: convert n-gon to triangles
-            for (size_t i = 1; i < face_vertices.size() - 1; i++) {
-                process_vertex(face_vertices[0], current_material_name);     // First vertex (pivot)
-                process_vertex(face_vertices[i], current_material_name);     // Current vertex
-                process_vertex(face_vertices[i + 1], current_material_name); // Next vertex
+                inds.push_back(v_map[triangle_verts[j]]);
             }
         }
     }
 
+    // Create meshes
     std::vector<Mesh*> meshes;
     for (const auto& pair : unique_vertices) {
         const std::string& mat_name = pair.first;
@@ -1467,14 +1776,24 @@ std::vector<Mesh*> loadOBJWithMTL(const std::string& obj_path) {
         glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.size() * sizeof(unsigned int), indices.data(), GL_STATIC_DRAW);
 
         GLsizei stride = sizeof(Vertex);
+        // Position
         glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, stride, (void*)offsetof(Vertex, position));
         glEnableVertexAttribArray(0);
+        // Color
         glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, stride, (void*)offsetof(Vertex, color));
         glEnableVertexAttribArray(1);
+        // Texcoord
         glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, stride, (void*)offsetof(Vertex, texcoord));
         glEnableVertexAttribArray(2);
+        // Normal
         glVertexAttribPointer(3, 3, GL_FLOAT, GL_FALSE, stride, (void*)offsetof(Vertex, normal));
         glEnableVertexAttribArray(3);
+        // Tangent
+        glVertexAttribPointer(4, 3, GL_FLOAT, GL_FALSE, stride, (void*)offsetof(Vertex, tangent));
+        glEnableVertexAttribArray(4);
+        // Bitangent
+        glVertexAttribPointer(5, 3, GL_FLOAT, GL_FALSE, stride, (void*)offsetof(Vertex, bitangent));
+        glEnableVertexAttribArray(5);
 
         glBindVertexArray(0);
 
@@ -1482,6 +1801,53 @@ std::vector<Mesh*> loadOBJWithMTL(const std::string& obj_path) {
     }
     
     return meshes;
+}
+
+void parse_texture_map_line(std::stringstream& ss, std::string& texture_filename) {
+    std::string token;
+    
+    while (ss >> token) {
+        // Check for flags that take one numerical argument
+        if (token == "-bm" || token == "-bl") {
+            // Consume and discard the next token (the numerical value).
+            std::string arg;
+            if (!(ss >> arg)) {
+                // Handle case where flag is present but value is missing
+                printf("Warning: Missing argument for flag '%s'\n", token.c_str());
+            }
+            continue;
+        }
+        
+        // Check for flags that take three numerical arguments
+        else if (token == "-o" || token == "-s" || token == "-t") {
+            // Consume and discard the next THREE tokens (u, v, w)
+            std::string arg1, arg2, arg3;
+            ss >> arg1 >> arg2 >> arg3;
+            continue;
+        }
+        
+        // Check for flags that take no arguments
+        else if (token == "-clamp" || token == "-mm") {
+            continue;
+        }
+        
+        // If the token is not a recognized flag, assume it is the filename itself
+        else if (token.length() > 0 && token[0] != '-') {
+            
+            texture_filename = token;
+            
+            std::string remainder;
+            std::getline(ss, remainder);
+            if (!remainder.empty()) {
+                // Append the remaining part of the line if any, usually after trimming leading spaces
+                remainder.erase(0, remainder.find_first_not_of(" \t\n\r\f\v"));
+                if (!remainder.empty()) {
+                    texture_filename += " " + remainder;
+                }
+            }
+            break;
+        }
+    }
 }
 
 void loadMTL(const std::string& mtl_path, std::unordered_map<std::string, Material>& materials) {
@@ -1493,6 +1859,7 @@ void loadMTL(const std::string& mtl_path, std::unordered_map<std::string, Materi
 
     std::string current_material_name;
     std::string line;
+    
     while (std::getline(file, line)) {
         std::stringstream ss(line);
         std::string token;
@@ -1502,24 +1869,120 @@ void loadMTL(const std::string& mtl_path, std::unordered_map<std::string, Materi
             ss >> current_material_name;
             materials[current_material_name] = createDefaultMaterial();
             materials[current_material_name].name = current_material_name;
-        } else if (token == "Ka" && materials.count(current_material_name)) {
-            ss >> materials[current_material_name].ambient.x >> materials[current_material_name].ambient.y >> materials[current_material_name].ambient.z;
-        } else if (token == "Kd" && materials.count(current_material_name)) {
-            ss >> materials[current_material_name].diffuse.x >> materials[current_material_name].diffuse.y >> materials[current_material_name].diffuse.z;
-            materials[current_material_name].diffuse_color = {materials[current_material_name].diffuse.x, materials[current_material_name].diffuse.y, materials[current_material_name].diffuse.z, 1.0f};
-        } else if (token == "Ks" && materials.count(current_material_name)) {
-            ss >> materials[current_material_name].specular.x >> materials[current_material_name].specular.y >> materials[current_material_name].specular.z;
-        } else if (token == "Ns" && materials.count(current_material_name)) {
-            ss >> materials[current_material_name].shininess;
+            
+        // PBR scalar maps
+        } else if (token == "Pr" && materials.count(current_material_name)) {
+            // Roughness value (0.0 to 1.0)
+            ss >> materials[current_material_name].roughness;
+            
+        } else if (token == "Pm" && materials.count(current_material_name)) {
+            // Metallic value (0.0 to 1.0)
+            ss >> materials[current_material_name].metallic;
+            
+        } else if (token == "Ke" && materials.count(current_material_name)) {
+            // Emissive color
+            ss >> materials[current_material_name].emissive.x
+               >> materials[current_material_name].emissive.y
+               >> materials[current_material_name].emissive.z;
+            
+        // Legacy texture maps
         } else if (token == "map_Kd" && materials.count(current_material_name)) {
             std::string texture_filename;
             ss >> texture_filename;
             std::string mtl_dir = mtl_path.substr(0, mtl_path.find_last_of('/'));
             std::string full_texture_path = mtl_dir + "/" + texture_filename;
-            materials[current_material_name].texture_id = loadTexture(full_texture_path);
-            if (materials[current_material_name].texture_id == 0) {
-                std::cerr << "Warning: Failed to load texture " << full_texture_path << " for material " << current_material_name << std::endl;
+            
+            GLuint tex_id = loadTexture(full_texture_path);
+            materials[current_material_name].texture_id = tex_id;
+            materials[current_material_name].albedo_map = tex_id;  // Use as albedo
+            
+            if (tex_id == 0) {
+                std::cerr << "Warning: Failed to load texture " << full_texture_path
+                         << " for material " << current_material_name << std::endl;
             }
+            
+        // PBR texture maps
+        } else if ((token == "map_Ka" || token == "map_albedo" || token == "map_base_color")
+                   && materials.count(current_material_name)) {
+            // Albedo/base color map (diffuse without lighting info)
+            std::string texture_filename;
+            ss >> texture_filename;
+            std::string mtl_dir = mtl_path.substr(0, mtl_path.find_last_of('/'));
+            std::string full_texture_path = mtl_dir + "/" + texture_filename;
+            
+            parse_texture_map_line(ss, full_texture_path);
+            materials[current_material_name].albedo_map = loadTexture(full_texture_path);
+            printf("Loaded albedo map for '%s': %s\n", current_material_name.c_str(), texture_filename.c_str());
+            
+        } else if ((token == "map_Pr" || token == "map_roughness")
+                   && materials.count(current_material_name)) {
+            // Roughness map
+            std::string texture_filename;
+            ss >> texture_filename;
+            std::string mtl_dir = mtl_path.substr(0, mtl_path.find_last_of('/'));
+            std::string full_texture_path = mtl_dir + "/" + texture_filename;
+            
+            parse_texture_map_line(ss, full_texture_path);
+            materials[current_material_name].roughness_map = loadTexture(full_texture_path);
+            printf("Loaded roughness map for '%s': %s\n", current_material_name.c_str(), texture_filename.c_str());
+            
+        } else if ((token == "map_Pm" || token == "map_metallic")
+                   && materials.count(current_material_name)) {
+            // Metallic map
+            std::string texture_filename;
+            ss >> texture_filename;
+            std::string mtl_dir = mtl_path.substr(0, mtl_path.find_last_of('/'));
+            std::string full_texture_path = mtl_dir + "/" + texture_filename;
+            
+            parse_texture_map_line(ss, full_texture_path);
+            materials[current_material_name].metallic_map = loadTexture(full_texture_path);
+            printf("Loaded metallic map for '%s': %s\n", current_material_name.c_str(), texture_filename.c_str());
+            
+        } else if ((token == "norm" || token == "map_Bump" || token == "bump")
+                   && materials.count(current_material_name)) {
+            // Normal map
+            std::string texture_filename;
+            ss >> texture_filename;
+            std::string mtl_dir = mtl_path.substr(0, mtl_path.find_last_of('/'));
+            std::string full_texture_path = mtl_dir + "/" + texture_filename;
+            
+            parse_texture_map_line(ss, full_texture_path);
+            materials[current_material_name].normal_map = loadTexture(full_texture_path);
+            printf("Loaded normal map for '%s': %s\n", current_material_name.c_str(), texture_filename.c_str());
+            
+        } else if (token == "map_ao" && materials.count(current_material_name)) {
+            // Ambient occlusion map
+            std::string texture_filename;
+            ss >> texture_filename;
+            std::string mtl_dir = mtl_path.substr(0, mtl_path.find_last_of('/'));
+            std::string full_texture_path = mtl_dir + "/" + texture_filename;
+            
+            parse_texture_map_line(ss, full_texture_path);
+            materials[current_material_name].ao_map = loadTexture(full_texture_path);
+            printf("Loaded AO map for '%s': %s\n", current_material_name.c_str(), texture_filename.c_str());
+            
+        } else if ((token == "map_Ke" || token == "map_emissive")
+                   && materials.count(current_material_name)) {
+            // Emissive map
+            std::string texture_filename;
+            ss >> texture_filename;
+            std::string mtl_dir = mtl_path.substr(0, mtl_path.find_last_of('/'));
+            std::string full_texture_path = mtl_dir + "/" + texture_filename;
+            
+            parse_texture_map_line(ss, full_texture_path);
+            materials[current_material_name].emissive_map = loadTexture(full_texture_path);
+            printf("Loaded emissive map for '%s': %s\n", current_material_name.c_str(), texture_filename.c_str());
+            
+        } else if (token == "map_metallic_roughness" && materials.count(current_material_name)) {
+            // Combined metallic-roughness map (glTF style: R = unused, G = roughness, B = metallic)
+            std::string texture_filename;
+            ss >> texture_filename;
+            std::string mtl_dir = mtl_path.substr(0, mtl_path.find_last_of('/'));
+            std::string full_texture_path = mtl_dir + "/" + texture_filename;
+            
+            parse_texture_map_line(ss, full_texture_path);
+            materials[current_material_name].metallic_roughness_map = loadTexture(full_texture_path);
+            printf("Loaded metallic-roughness map for '%s': %s\n", current_material_name.c_str(), texture_filename.c_str());
         }
     }
 }
@@ -1572,7 +2035,7 @@ int main() {
     // Anti-aliasing
     glfwWindowHint(GLFW_SAMPLES, 4);
     
-    GLFWwindow* window = glfwCreateWindow(window_width, window_height, "OpenGL 3D Engine", NULL, NULL);
+    GLFWwindow* window = glfwCreateWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "OpenGL 3D Engine", NULL, NULL);
     if (!window) {
         printf("Failed to create GLFW window\n");
         glfwTerminate();
@@ -1609,7 +2072,7 @@ int main() {
     initShadowMap();
     
     // Initialize camera
-    global_camera = create_camera(static_cast<float>(window_width) / static_cast<float>(window_height));
+    global_camera = create_camera(static_cast<float>(WINDOW_WIDTH) / static_cast<float>(WINDOW_HEIGHT));
     camera_update_vectors(&global_camera);
     
     // Z buffer
@@ -1660,6 +2123,7 @@ int main() {
     std::vector<Mesh*> cube_mesh = loadOBJMesh("Cube/cube.obj");
     std::vector<Mesh*> sphere_mesh = loadOBJMesh("Sphere/sphere.obj");
     std::vector<Mesh*> streetlight_mesh = loadOBJMesh("Streetlight/streetlight.obj");
+    std::vector<Mesh*> cone_mesh = loadOBJMesh("Cone/cone.obj");
     
     // ============================================================================
     // CREATE SCENE OBJECTS
@@ -1667,7 +2131,7 @@ int main() {
     
     // CREATE LIGHT SOURCES //
     
-    createOmniDirLight(glm::vec3(0, 10, 0), glm::vec3(1, 1, 1), 1.0f, sphere_mesh);
+    createPointLight("light", glm::vec3(-7.05, 3.5, 0.05), glm::vec3(1, 1, 1), 1.0f, {}, glm::vec3(0.25, 0.25, 0.25), glm::vec3(0, -0.25, 0), std::vector<int>{CULL_BACK});
     
     // CREATE ENTITIES //
         
@@ -1676,7 +2140,7 @@ int main() {
     createEntity("instructions", instructions_mesh, glm::vec3(0, 2, 4), glm::vec3(0, 0, 0), glm::vec3(1, 1, 1), std::vector<int> {CULL_NONE});
     createEntity("cube", cube_mesh, glm::vec3(5, 3, 0), glm::vec3(0, 0, 0), glm::vec3(1, 1, 1), std::vector<int> {CULL_BACK});
     createEntity("sphere", sphere_mesh, glm::vec3(0, 2, -5), glm::vec3(0, 0, 0), glm::vec3(1, 1, 1), std::vector<int> {CULL_BACK});
-    createEntity("streetlight", streetlight_mesh, glm::vec3(-5, 0.05, 0), glm::vec3(0, 0, 0), glm::vec3(1, 1, 1), std::vector<int> {CULL_BACK});
+    createEntity("streetlight", streetlight_mesh, glm::vec3(-7, 0.05, 0), glm::vec3(1, 1, 1), glm::vec3(1, 1, 1), std::vector<int>{CULL_BACK});
     
     printf("Total triangles: %d\n", total_triangles);
     printf("Active entities: %zu\n", entity_manager.size());
@@ -1771,7 +2235,25 @@ int main() {
         for (size_t i = 0; i < entity_manager.size(); i++) {
             Entity* entity = entity_manager.getEntityAt(i);
             if (entity && entity->active) {
-                renderer->drawEntity(entity, global_camera, lights, shadowLightIndex);
+                // Check if this entity is a light representation
+                bool is_light = false;
+                for (const auto& light : lights) {
+                    if (entity->name == light.entity_name) {
+                        is_light = true;
+                        // Render as unlit emissive object
+                        for (Mesh* mesh : entity->meshes) {
+                            if (mesh && mesh->isValid()) {
+                                renderer->drawUnlitMesh(entity, mesh, light.color, light.intensity);
+                            }
+                        }
+                        break;
+                    }
+                }
+                
+                // Render normally if not a light
+                if (!is_light) {
+                    renderer->drawEntity(entity, global_camera, lights, shadowLightIndex);
+                }
             }
         }
         
@@ -1845,8 +2327,8 @@ void mouse_callback(GLFWwindow* window, double xpos, double ypos) {
 }
 
 void framebuffer_size_callback(GLFWwindow* window, int width, int height) {
-    window_width = width;
-    window_height = height;
+    WINDOW_WIDTH = width;
+    WINDOW_HEIGHT = height;
     (void)window;
     glViewport(0, 0, width, height);
     if (height > 0) {
