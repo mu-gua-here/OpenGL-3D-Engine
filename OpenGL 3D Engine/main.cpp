@@ -7,6 +7,9 @@
 
 /*
  
+ NOTES
+ 1. I used ChatGPT to generate PBR texture packs when only the albedo texture was present
+ 
  IMPLEMENTATION LIST
  1. Add collision detection
  2. Add PBR maps
@@ -95,6 +98,7 @@ GLuint default_texture_id = 0;
 
 std::unordered_set<class Mesh*> global_mesh_registry;
 const glm::vec3 VEC3_NO_CHANGE = glm::vec3(NAN, NAN, NAN);
+const float SCALAR_NO_CHANGE = NAN;
 
 void updateFPS(GLFWwindow* window) {
     static double lastTime = glfwGetTime();
@@ -469,13 +473,22 @@ public:
     bool updateEntity(std::string name, const glm::vec3& pos, const glm::vec3& rot, const glm::vec3& scale) {
         for (size_t i = 0; i < entities.size(); i++) {
             if (active_flags[i] && entities[i].name == name) {
-                if (!isnan(pos.x)) entities[i].position = pos;
-                if (!isnan(rot.x)) {
-                    entities[i].rotation.x = rot.x;
-                    entities[i].rotation.y = rot.y;
-                    entities[i].rotation.z = rot.z;
-                }
-                if (!isnan(scale.x)) entities[i].scale = scale;
+                
+                // Positions
+                if (!isnan(pos.x)) entities[i].position.x = pos.x;
+                if (!isnan(pos.y)) entities[i].position.y = pos.y;
+                if (!isnan(pos.z)) entities[i].position.z = pos.z;
+                
+                // Rotations
+                if (!isnan(rot.x)) entities[i].rotation.x = rot.x;
+                if (!isnan(rot.y)) entities[i].rotation.y = rot.y;
+                if (!isnan(rot.z)) entities[i].rotation.z = rot.z;
+                
+                // Scale
+                if (!isnan(scale.x)) entities[i].scale.x = scale.x;
+                if (!isnan(scale.y)) entities[i].scale.y = scale.y;
+                if (!isnan(scale.z)) entities[i].scale.z = scale.z;
+                
                 return true;
             }
         }
@@ -554,7 +567,7 @@ void createEntity(std::string name, std::vector<Mesh*> meshes, glm::vec3 pos, gl
     }
     total_triangles += mesh_triangles;
     
-    printf("Created entity '%s' with %zu submesh(es) (triangles: %u)\n",
+    printf("Created entity '%s' with %zu submeshes (triangles: %u)\n",
            name.c_str(), meshes.size(), mesh_triangles);
 }
 
@@ -562,23 +575,73 @@ void createEntity(std::string name, std::vector<Mesh*> meshes, glm::vec3 pos, gl
 // LIGHTING SYSTEM
 // ============================================================================
 
+// Add an enum to classify light types
+typedef enum {
+    POINT_LIGHT = 0,
+    SPOT_LIGHT = 1
+} LightType;
+
 typedef struct {
     glm::vec3 position;
     glm::vec3 color;
     float intensity;
+    
+    // Spotlight-specific parameters
+    glm::vec3 direction;
+    glm::vec3 initial_direction;
+    glm::vec3 euler_rotation;
+    float inner_cutoff_cos;
+    float outer_cutoff_cos;
+    int type;
+    
     std::string entity_name;
 } Light;
 
 std::vector<Light> lights;
 
-void createPointLight(std::string name, glm::vec3 position, glm::vec3 color, float intensity, std::vector<Mesh*> light_mesh, glm::vec3 scale, glm::vec3 mesh_offset, std::vector<int> cull_mode) {
+void createSpotlight(std::string name, glm::vec3 position, glm::vec3 color, float intensity,
+                     glm::vec3 initial_direction, float inner_angle_deg, float outer_angle_deg, glm::vec3 rotation,
+                     std::vector<Mesh*> light_mesh, glm::vec3 scale, std::vector<int> cull_mode) {
     Light light;
     light.position = position;
     light.color = color;
     light.intensity = intensity;
+    
+    // Store the initial/local direction and rotation
+    light.initial_direction = glm::normalize(initial_direction);
+    light.euler_rotation = rotation;
+    
+    // The `light.direction` that gets sent to the shader will be calculated
+    // just before rendering (see step 3). For now, initialize it.
+    light.direction = glm::normalize(initial_direction);
+    
+    light.inner_cutoff_cos = glm::cos(glm::radians(inner_angle_deg));
+    light.outer_cutoff_cos = glm::cos(glm::radians(outer_angle_deg));
+    light.type = SPOT_LIGHT;
+
     light.entity_name = name;
     lights.push_back(light);
-    createEntity(light.entity_name, light_mesh, position + mesh_offset, glm::vec3(0, 0, 0), scale, cull_mode);
+    
+    // The light's entity also needs to be created with the rotation
+    createEntity(light.entity_name, light_mesh, position, rotation, scale, cull_mode);
+}
+
+void createPointLight(std::string name, glm::vec3 position, glm::vec3 color, float intensity,
+                      std::vector<Mesh*> light_mesh, glm::vec3 scale, std::vector<int> cull_mode) {
+    Light light;
+    light.position = position;
+    light.color = color;
+    light.intensity = intensity;
+    
+    // Set spotlight properties and convert angles to cosine
+    light.direction = glm::vec3(0.0f, -1.0f, 0.0f);
+    light.inner_cutoff_cos = -1.0f;
+    light.outer_cutoff_cos = -1.0f;
+    light.type = POINT_LIGHT;
+    
+    light.entity_name = name;
+    lights.push_back(light);
+    createEntity(light.entity_name, light_mesh, position, light.direction, scale, std::vector<int> {CULL_BACK});
 }
 
 // ============================================================================
@@ -853,12 +916,16 @@ uniform bool hasEmissiveMap;
 
 // Lighting
 #define MAX_LIGHTS 16
-uniform vec3 lightPositions[MAX_LIGHTS];
-uniform vec3 lightColors[MAX_LIGHTS];
-uniform float lightIntensities[MAX_LIGHTS];
 uniform int lightCount;
 uniform vec3 viewPos;
 uniform int shadowLightIndex;
+uniform vec3 lightPositions[MAX_LIGHTS];
+uniform vec3 lightColors[MAX_LIGHTS];
+uniform float lightIntensities[MAX_LIGHTS];
+uniform vec3 lightDirections[MAX_LIGHTS];
+uniform float lightInnerCutoffs[MAX_LIGHTS];
+uniform float lightOuterCutoffs[MAX_LIGHTS];
+uniform float lightTypes[MAX_LIGHTS];
 
 const float PI = 3.14159265359;
 
@@ -928,13 +995,14 @@ float ShadowCalculation(vec4 fragPosLightSpace, vec3 normal, vec3 lightDir) {
     
     float shadow = 0.0;
     vec2 texelSize = 1.0 / textureSize(shadowMap, 0);
-    for (int x = -1; x <= 1; ++x) {
-        for (int y = -1; y <= 1; ++y) {
+    int pcfKernelSize = 2;
+    for (int x = -pcfKernelSize; x <= pcfKernelSize; ++x) {
+        for (int y = -pcfKernelSize; y <= pcfKernelSize; ++y) {
             float pcfDepth = texture(shadowMap, projCoords.xy + vec2(x, y) * texelSize).r;
             shadow += currentDepth - bias > pcfDepth ? 1.0 : 0.0;
         }
     }
-    shadow /= 9.0;
+    shadow /= (pcfKernelSize * 2 + 1) * (pcfKernelSize * 2 + 1);
     shadow = mix(1.0, shadow, edgeFade);
     
     return shadow;
@@ -963,6 +1031,11 @@ void main() {
         N = normalize(Normal);
     }
     
+    // Determine if face is facing towards or away from camera
+    if (!gl_FrontFacing) {
+        N = -N; 
+    }
+    
     vec3 V = normalize(viewPos - FragPos);
     
     // Calculate reflectance at normal incidence (F0)
@@ -982,6 +1055,29 @@ void main() {
         float attenuation = 1.0 / (distance * distance);
         vec3 radiance = lightColors[i] * lightIntensities[i] * attenuation;
         
+        float spot_intensity = 1.0;
+
+        // Check if the current light is a spotlight
+        if (lightTypes[i] == 1.0) {
+            vec3 fragmentToLightDir = -L;
+            
+            float theta = dot(fragmentToLightDir, lightDirections[i]);
+            
+            float inner_cos = lightInnerCutoffs[i];
+            float outer_cos = lightOuterCutoffs[i];
+            
+            // Check if outside the outer cone
+            if (theta < outer_cos) {
+                spot_intensity = 0.0;
+            }
+            // Check if inside the soft falloff region
+            else if (theta < inner_cos) {
+                float epsilon = inner_cos - outer_cos;
+                spot_intensity = clamp((theta - outer_cos) / epsilon, 0.0, 1.0);
+            }
+            radiance *= spot_intensity;
+        }
+                
         // Cook-Torrance BRDF
         float NDF = DistributionGGX(N, H, roughnessValue);
         float G = GeometrySmith(N, V, L, roughnessValue);
@@ -992,7 +1088,7 @@ void main() {
         kD *= 1.0 - metallicValue;  // Metals have no diffuse
         
         vec3 numerator = NDF * G * F;
-        float denominator = 4.0 * max(dot(N, V), 0.0) * max(dot(N, L), 0.0) + 0.0001;
+        float denominator = 4.0 * max(abs(dot(N, V)), 0.0) * max(dot(N, L), 0.0) + 0.0001;
         vec3 specular = numerator / denominator;
         
         // Add to outgoing radiance Lo
@@ -1107,9 +1203,7 @@ uniform sampler2D u_texture;
 
 void main() {
     vec4 texColor = texture(u_texture, TexCoord);
-    if (texColor.a < 0.5) {
-        discard; // Prevents the fragment from writing to the depth buffer
-    }
+    if (texColor.a < 0.5) discard; // Prevents the fragment from writing to the depth buffer
     // Depth is automatically written
 }
 )";
@@ -1269,29 +1363,45 @@ public:
         
         glm::vec3 lightPos = light.position;
         
-        // Look at scene center or camera
-        glm::vec3 lightTarget = glm::vec3(0.0f, 0.0f, 0.0f);
-        
-        // Calculate light direction
-        glm::vec3 lightDir = glm::normalize(lightTarget - lightPos);
-        
-        // Choose up vector dynamically
+        glm::mat4 lightProjection;
         glm::vec3 up;
-        if (abs(lightDir.y) > 0.99f) {
-            // Light is pointing nearly straight up or down
-            // Use X axis as up vector instead
-            up = glm::vec3(1.0f, 0.0f, 0.0f);
+        glm::vec3 finalLightDir;
+        
+        if (light.type == SPOT_LIGHT) {
+            // Move along the light's actual direction vector
+            glm::vec3 lightTarget = lightPos + light.direction;
+            
+            finalLightDir = light.direction;
+            
+            // Choose up vector dynamically based on the calculated light direction
+            if (abs(finalLightDir.y) > 0.99f) {
+                up = glm::vec3(1.0f, 0.0f, 0.0f);
+            } else {
+                up = glm::vec3(0.0f, 1.0f, 0.0f);
+            }
+            
+            glm::mat4 lightView = glm::lookAt(lightPos, lightTarget, up);
+            
+            float outerAngle = glm::degrees(glm::acos(light.outer_cutoff_cos));
+            lightProjection = glm::perspective(glm::radians(outerAngle * 2.0f), 1.0f, 0.5f, 100.0f);
+            
+            lightSpaceMatrix = lightProjection * lightView;
+            
         } else {
-            // Normal case: use Y axis as up
-            up = glm::vec3(0.0f, 1.0f, 0.0f);
+            // Omni-directional point light
+            lightProjection = glm::perspective(glm::radians(90.0f), 1.0f, 0.5f, 100.0f);
+            glm::vec3 lightTarget = glm::vec3(0.0f, 0.0f, 0.0f);
+            finalLightDir = glm::normalize(lightTarget - lightPos);
+            
+            if (abs(finalLightDir.y) > 0.99f) {
+                up = glm::vec3(1.0f, 0.0f, 0.0f);
+            } else {
+                up = glm::vec3(0.0f, 1.0f, 0.0f);
+            }
+            glm::mat4 lightView = glm::lookAt(lightPos, lightTarget, up);
+            
+            lightSpaceMatrix = lightProjection * lightView;
         }
-        
-        // Perspective projection for point lights
-        glm::mat4 lightProjection = glm::perspective(glm::radians(90.0f), 1.0f, 0.5f, 100.0f);
-        
-        glm::mat4 lightView = glm::lookAt(lightPos, lightTarget, up);
-        
-        lightSpaceMatrix = lightProjection * lightView;
         
         shadow_shader->use();
         shadow_shader->setMat4("lightSpaceMatrix", lightSpaceMatrix);
@@ -1347,6 +1457,45 @@ public:
         glCullFace(GL_BACK);
     }
     
+    void setLightingUniforms() {
+        std::vector<glm::vec3> positions;
+        std::vector<glm::vec3> colors;
+        std::vector<float> intensities;
+        std::vector<glm::vec3> directions;
+        std::vector<float> inner_cutoffs;
+        std::vector<float> outer_cutoffs;
+        std::vector<float> types;
+
+        for (const auto& light : lights) {
+            glm::mat4 rotationMatrix(1.0f);
+            rotationMatrix = glm::rotate(rotationMatrix, glm::radians(light.euler_rotation.y), glm::vec3(0.0f, 1.0f, 0.0f)); // Yaw
+            rotationMatrix = glm::rotate(rotationMatrix, glm::radians(light.euler_rotation.x), glm::vec3(1.0f, 0.0f, 0.0f)); // Pitch
+            rotationMatrix = glm::rotate(rotationMatrix, glm::radians(light.euler_rotation.z), glm::vec3(0.0f, 0.0f, 1.0f)); // Roll
+            
+            glm::vec3 world_direction = glm::normalize(glm::vec3(rotationMatrix * glm::vec4(light.initial_direction, 0.0f)));
+            
+            positions.push_back(light.position);
+            colors.push_back(light.color);
+            intensities.push_back(light.intensity);
+            directions.push_back(light.direction);
+            inner_cutoffs.push_back(light.inner_cutoff_cos);
+            outer_cutoffs.push_back(light.outer_cutoff_cos);
+            types.push_back((float)light.type); // Send light type as float to match GLSL
+        }
+
+        pbr_shader->use();
+        
+        pbr_shader->setInt("lightCount", (int)lights.size());
+        pbr_shader->setVec3Array("lightPositions", positions);
+        pbr_shader->setVec3Array("lightColors", colors);
+        pbr_shader->setFloatArray("lightIntensities", intensities);
+        
+        pbr_shader->setVec3Array("lightDirections", directions);
+        pbr_shader->setFloatArray("lightInnerCutoffs", inner_cutoffs);
+        pbr_shader->setFloatArray("lightOuterCutoffs", outer_cutoffs);
+        pbr_shader->setFloatArray("lightTypes", types);
+    }
+    
     void drawEntity(Entity* entity, const Camera& camera, const std::vector<Light>& lights, int shadowLightIndex) {
         if (!entity->active) return;
         
@@ -1382,6 +1531,12 @@ public:
         
         pbr_shader->use();
         
+        // Camera uniforms
+        pbr_shader->setMat4("view", view);
+        pbr_shader->setMat4("projection", projection);
+        pbr_shader->setMat4("lightSpaceMatrix", lightSpaceMatrix);
+        pbr_shader->setVec3("viewPos", camera.position);
+        
         // Calculate matrices
         glm::mat4 scale_matrix = glm::scale(glm::mat4(1.0f), entity->scale);
         glm::mat4 rotation_x = glm::rotate(glm::mat4(1.0f), glm::radians(entity->rotation.x),
@@ -1395,31 +1550,10 @@ public:
         glm::mat4 model = translation * rotation * scale_matrix;
         glm::mat3 normal = glm::transpose(glm::inverse(glm::mat3(model)));
         
-        // Set uniforms
+        // Set mesh uniforms
         pbr_shader->setMat4("model", model);
-        pbr_shader->setMat4("view", view);
-        pbr_shader->setMat4("projection", projection);
         pbr_shader->setMat3("normalMatrix", normal);
-        pbr_shader->setMat4("lightSpaceMatrix", lightSpaceMatrix);
         pbr_shader->setInt("shadowLightIndex", shadowLightIndex);
-        
-        // Set lighting
-        int light_count = std::min(static_cast<int>(lights.size()), MAX_LIGHTS);
-        pbr_shader->setInt("lightCount", light_count);
-        pbr_shader->setVec3("viewPos", camera.position);
-        
-        std::vector<glm::vec3> positions, colors;
-        std::vector<float> intensities;
-        
-        for (int i = 0; i < light_count; i++) {
-            positions.push_back(lights[i].position);
-            colors.push_back(lights[i].color);
-            intensities.push_back(lights[i].intensity * 1000.0f);
-        }
-        
-        pbr_shader->setVec3Array("lightPositions", positions);
-        pbr_shader->setVec3Array("lightColors", colors);
-        pbr_shader->setFloatArray("lightIntensities", intensities);
         
         // Set material properties (fallback values)
         pbr_shader->setVec3("baseColor", mesh->material.base_color);
@@ -1803,6 +1937,7 @@ std::vector<Mesh*> loadOBJWithMTL(const std::string& obj_path) {
     return meshes;
 }
 
+// Helper function to discard and ignore optional flags in MTL files
 void parse_texture_map_line(std::stringstream& ss, std::string& texture_filename) {
     std::string token;
     
@@ -1887,6 +2022,7 @@ void loadMTL(const std::string& mtl_path, std::unordered_map<std::string, Materi
             
         // Legacy texture maps
         } else if (token == "map_Kd" && materials.count(current_material_name)) {
+            
             std::string texture_filename;
             ss >> texture_filename;
             std::string mtl_dir = mtl_path.substr(0, mtl_path.find_last_of('/'));
@@ -1906,11 +2042,10 @@ void loadMTL(const std::string& mtl_path, std::unordered_map<std::string, Materi
                    && materials.count(current_material_name)) {
             // Albedo/base color map (diffuse without lighting info)
             std::string texture_filename;
-            ss >> texture_filename;
+            parse_texture_map_line(ss, texture_filename);
             std::string mtl_dir = mtl_path.substr(0, mtl_path.find_last_of('/'));
             std::string full_texture_path = mtl_dir + "/" + texture_filename;
             
-            parse_texture_map_line(ss, full_texture_path);
             materials[current_material_name].albedo_map = loadTexture(full_texture_path);
             printf("Loaded albedo map for '%s': %s\n", current_material_name.c_str(), texture_filename.c_str());
             
@@ -1918,11 +2053,10 @@ void loadMTL(const std::string& mtl_path, std::unordered_map<std::string, Materi
                    && materials.count(current_material_name)) {
             // Roughness map
             std::string texture_filename;
-            ss >> texture_filename;
+            parse_texture_map_line(ss, texture_filename);
             std::string mtl_dir = mtl_path.substr(0, mtl_path.find_last_of('/'));
             std::string full_texture_path = mtl_dir + "/" + texture_filename;
             
-            parse_texture_map_line(ss, full_texture_path);
             materials[current_material_name].roughness_map = loadTexture(full_texture_path);
             printf("Loaded roughness map for '%s': %s\n", current_material_name.c_str(), texture_filename.c_str());
             
@@ -1930,11 +2064,10 @@ void loadMTL(const std::string& mtl_path, std::unordered_map<std::string, Materi
                    && materials.count(current_material_name)) {
             // Metallic map
             std::string texture_filename;
-            ss >> texture_filename;
+            parse_texture_map_line(ss, texture_filename);
             std::string mtl_dir = mtl_path.substr(0, mtl_path.find_last_of('/'));
             std::string full_texture_path = mtl_dir + "/" + texture_filename;
             
-            parse_texture_map_line(ss, full_texture_path);
             materials[current_material_name].metallic_map = loadTexture(full_texture_path);
             printf("Loaded metallic map for '%s': %s\n", current_material_name.c_str(), texture_filename.c_str());
             
@@ -1942,22 +2075,20 @@ void loadMTL(const std::string& mtl_path, std::unordered_map<std::string, Materi
                    && materials.count(current_material_name)) {
             // Normal map
             std::string texture_filename;
-            ss >> texture_filename;
+            parse_texture_map_line(ss, texture_filename);
             std::string mtl_dir = mtl_path.substr(0, mtl_path.find_last_of('/'));
             std::string full_texture_path = mtl_dir + "/" + texture_filename;
             
-            parse_texture_map_line(ss, full_texture_path);
             materials[current_material_name].normal_map = loadTexture(full_texture_path);
             printf("Loaded normal map for '%s': %s\n", current_material_name.c_str(), texture_filename.c_str());
             
         } else if (token == "map_ao" && materials.count(current_material_name)) {
             // Ambient occlusion map
             std::string texture_filename;
-            ss >> texture_filename;
+            parse_texture_map_line(ss, texture_filename);
             std::string mtl_dir = mtl_path.substr(0, mtl_path.find_last_of('/'));
             std::string full_texture_path = mtl_dir + "/" + texture_filename;
             
-            parse_texture_map_line(ss, full_texture_path);
             materials[current_material_name].ao_map = loadTexture(full_texture_path);
             printf("Loaded AO map for '%s': %s\n", current_material_name.c_str(), texture_filename.c_str());
             
@@ -1965,22 +2096,20 @@ void loadMTL(const std::string& mtl_path, std::unordered_map<std::string, Materi
                    && materials.count(current_material_name)) {
             // Emissive map
             std::string texture_filename;
-            ss >> texture_filename;
+            parse_texture_map_line(ss, texture_filename);
             std::string mtl_dir = mtl_path.substr(0, mtl_path.find_last_of('/'));
             std::string full_texture_path = mtl_dir + "/" + texture_filename;
             
-            parse_texture_map_line(ss, full_texture_path);
             materials[current_material_name].emissive_map = loadTexture(full_texture_path);
             printf("Loaded emissive map for '%s': %s\n", current_material_name.c_str(), texture_filename.c_str());
             
         } else if (token == "map_metallic_roughness" && materials.count(current_material_name)) {
             // Combined metallic-roughness map (glTF style: R = unused, G = roughness, B = metallic)
             std::string texture_filename;
-            ss >> texture_filename;
+            parse_texture_map_line(ss, texture_filename);
             std::string mtl_dir = mtl_path.substr(0, mtl_path.find_last_of('/'));
             std::string full_texture_path = mtl_dir + "/" + texture_filename;
             
-            parse_texture_map_line(ss, full_texture_path);
             materials[current_material_name].metallic_roughness_map = loadTexture(full_texture_path);
             printf("Loaded metallic-roughness map for '%s': %s\n", current_material_name.c_str(), texture_filename.c_str());
         }
@@ -2131,7 +2260,11 @@ int main() {
     
     // CREATE LIGHT SOURCES //
     
-    createPointLight("light", glm::vec3(-7.05, 3.5, 0.05), glm::vec3(1, 1, 1), 1.0f, {}, glm::vec3(0.25, 0.25, 0.25), glm::vec3(0, -0.25, 0), std::vector<int>{CULL_BACK});
+    createPointLight("light_1", glm::vec3(0, 10, 0), glm::vec3(1, 1, 1), 500.0f,
+                     sphere_mesh, glm::vec3(0.25, 0.25, 0.25), std::vector<int>{CULL_BACK});
+    createSpotlight("light_0", glm::vec3(-7.05, 3.5, 0.05), glm::vec3(1, 1, 1), 1000.0f,
+                    glm::vec3(1, 0, 0), 12.5f, 17.5f, glm::vec3(0, 0, 0),
+                    {}, glm::vec3(0.1, 0.1, 0.1), std::vector<int>{CULL_BACK});
     
     // CREATE ENTITIES //
         
@@ -2150,23 +2283,9 @@ int main() {
     // ============================================================================
     
     while (!glfwWindowShouldClose(window)) {
-        glfwPollEvents();
         updateFPS(window);
         
         if (!paused) {
-            
-            // ============================================================================
-            // UPDATE SCENE OBJECTS
-            // ============================================================================
-            
-            // UPDATE LIGHTS
-            // lights[0].position = global_camera.position;
-            
-            // UPDATE OBJECTS
-            entity_manager.updateEntity("cube", VEC3_NO_CHANGE, glm::vec3(update_count, update_count * 0.5f, 0), VEC3_NO_CHANGE);
-            entity_manager.updateEntity("sphere", glm::vec3(0, 2.5 + sinf(update_count * 0.01f), -5), glm::vec3(update_count, 0, 0), VEC3_NO_CHANGE);
-            
-            update_count += speed_multiplier;
             
             // ============================================================================
             // PLAYER TICK
@@ -2176,7 +2295,6 @@ int main() {
             float sin_yaw = sinf(yaw_rad);
             float cos_yaw = cosf(yaw_rad);
             glm::vec3 cam_offset = glm::vec3(0.0f);
-            
             float camera_speed = speed_multiplier * 0.05f;
             
             // Sprint
@@ -2214,11 +2332,30 @@ int main() {
             // Update camera matrices
             view = camera_get_view_matrix(&global_camera);
             projection = camera_get_projection(&global_camera);
+            
+            // ============================================================================
+            // UPDATE SCENE OBJECTS
+            // ============================================================================
+            
+            // UPDATE LIGHTS
+            
+            lights[1].position = glm::vec3(global_camera.position);
+            lights[1].direction = glm::vec3(global_camera.front);
+            
+            // UPDATE OBJECTS
+            
+            entity_manager.updateEntity("cube", VEC3_NO_CHANGE, glm::vec3(update_count, update_count * 0.5f, SCALAR_NO_CHANGE), VEC3_NO_CHANGE);
+            entity_manager.updateEntity("sphere", glm::vec3(SCALAR_NO_CHANGE, 2.5 + sinf(update_count * 0.01f), SCALAR_NO_CHANGE), glm::vec3(update_count, 0, 0), VEC3_NO_CHANGE);
+            
+            update_count += speed_multiplier;
+            
         }
         
         // Clear background
         glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        
+        renderer->setLightingUniforms();
         
         // Render shadow map
         int shadowLightIndex = -1;
@@ -2257,6 +2394,7 @@ int main() {
             }
         }
         
+        glfwPollEvents();
         glfwSwapBuffers(window);
         
         // Handle pause/unpause
