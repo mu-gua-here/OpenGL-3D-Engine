@@ -8,27 +8,33 @@
 /*
  
  NOTES
- 1. I used ChatGPT to generate PBR texture packs when only the albedo texture was present
  
  IMPLEMENTATION LIST
  1. Add collision detection
- 2. Add PBR maps
- 3. Physics (maybe)
- 4. Add entity instancing & batching
- 5. Optimisations
+ 2. Physics (maybe)
+ 3. Add entity instancing & batching
+ 4. Optimisations
     a. Batching
     b. Instancing
     c. Frustum culling
     d. LOD
  
  BUGS / IMPROVEMENTS LIST
- 1. Entity deletion optimization (memory leaks are present in code) -> use
+ 1. Entity deletion optimization (memory leaks are present in current code)
+ 2. Fix goofy-ahh AO and roughness broken texture
+ 3. Shadow mapping not working for directional lights
+ 4. Fix broken POM :cry:
  
  */
 
-// OpenGL internal
+// OpenGL-related
 #include <GLFW/glfw3.h>
 #include "glad/glad.h"
+
+// ImGui
+#include "imgui.h"
+#include "imgui_impl_glfw.h"
+#include "imgui_impl_opengl3.h"
 
 // Texture loader
 #define STB_IMAGE_IMPLEMENTATION
@@ -41,7 +47,8 @@
 #include <sstream>
 #include <vector>
 #include <unordered_set>
-#include <unordered_map>
+#include <memory>
+#define _USE_MATH_DEFINES
 #include <cmath>
 
 // Filesystem access
@@ -78,6 +85,7 @@ float frame_time = 1.0f;
 float speed_multiplier = 1.0f;
 glm::mat4 view;
 glm::mat4 projection;
+bool fullscreen = false;
 
 // Scene stats
 unsigned int total_triangles = 0;
@@ -91,12 +99,14 @@ const unsigned int SHADOW_HEIGHT = 4096;
 glm::mat4 lightSpaceMatrix;
 
 // Game settings
-#define MAX_LIGHTS 16
+#define MAX_LIGHTS 8
 float mouse_sensitivity = 0.1f;
+
+// Skybox
+unsigned int skyboxID;
 
 GLuint default_texture_id = 0;
 
-std::unordered_set<class Mesh*> global_mesh_registry;
 const glm::vec3 VEC3_NO_CHANGE = glm::vec3(NAN, NAN, NAN);
 const float SCALAR_NO_CHANGE = NAN;
 
@@ -116,9 +126,7 @@ void updateFPS(GLFWwindow* window) {
     if (fpsTimer >= 1.0) {
         fps = frameCount / fpsTimer;
         char title[256];
-        snprintf(title, sizeof(title),
-            "OpenGL 3D Engine - FPS: %.1f | Frame time: %.3f ms",
-            fps, frame_time * 1000.0);
+        snprintf(title, sizeof(title), "OpenGL 3D Engine by @mu-gua-here");
         glfwSetWindowTitle(window, title);
         frameCount = 0;
         fpsTimer = 0.0;
@@ -186,7 +194,7 @@ public:
     glm::vec4 toVec4() const { return glm::vec4(r, g, b, a); }
 };
 
-// Material class with PBR texture support
+// Material class
 class Material {
 public:
     std::string name;
@@ -200,29 +208,28 @@ public:
     // Texture IDs - 0 means "not present"
     GLuint albedo_map = 0;      // Base color texture
     GLuint normal_map = 0;      // Normal/bump map
-    GLuint metallic_map = 0;    // Metallic values
-    GLuint roughness_map = 0;   // Roughness values
-    GLuint ao_map = 0;          // Ambient occlusion
+    GLuint orm_map = 0;         // AO, roughnesss and metallic maps combined
     GLuint emissive_map = 0;    // Self-illumination
     
     // For metallic-roughness combined textures (common in glTF)
     GLuint metallic_roughness_map = 0;  // R = unused, G = roughness, B = metallic
     
-    // Legacy texture (for backward compatibility with your current code)
+    // Legacy texture settings
     GLuint texture_id = 0;
     Color diffuse_color;
-        
+    
+    float height_scale = 0.0f;
+    
     Material() = default;
     Material(const std::string& name) : name(name) {}
     
     // Check if a specific map is present
     bool hasAlbedoMap() const { return albedo_map != 0; }
     bool hasNormalMap() const { return normal_map != 0; }
-    bool hasMetallicMap() const { return metallic_map != 0; }
-    bool hasRoughnessMap() const { return roughness_map != 0; }
-    bool hasAOMap() const { return ao_map != 0; }
+    bool hasORMMap() const { return orm_map != 0; }
     bool hasEmissiveMap() const { return emissive_map != 0; }
     bool hasMetallicRoughnessMap() const { return metallic_roughness_map != 0; }
+    bool hasHeightMap() const { return orm_map != 0; }
 };
 
 Material createDefaultMaterial() {
@@ -393,24 +400,19 @@ public:
     std::vector<float> vertices_data;
     std::vector<unsigned int> indices_data;
     
-    size_t vertex_count;
-    size_t index_count;
     unsigned int TRIANGLE_COUNT;
     unsigned int INDEX_COUNT;
     GLuint VAO, VBO, EBO;
-    GLuint texture_id;
     Material material;
     int cull_mode;
     bool is_cleaned_up;
     
-    Mesh() : vertex_count(0), index_count(0), TRIANGLE_COUNT(0), VAO(0), VBO(0), EBO(0), texture_id(0), cull_mode(CULL_NONE), is_cleaned_up(false) {
+    Mesh() : TRIANGLE_COUNT(0), VAO(0), VBO(0), EBO(0), cull_mode(CULL_NONE), is_cleaned_up(false) {
         material = createDefaultMaterial();
-        global_mesh_registry.insert(this);
     }
     
     ~Mesh() {
         cleanup();
-        global_mesh_registry.erase(this);
     }
     
     GLuint getVAO() const { return VAO; }
@@ -426,53 +428,37 @@ public:
         if (VBO != 0) { glDeleteBuffers(1, &VBO); VBO = 0; }
         if (EBO != 0) { glDeleteBuffers(1, &EBO); EBO = 0; }
         
-        vertex_count = index_count = TRIANGLE_COUNT = INDEX_COUNT = 0;
+        TRIANGLE_COUNT = INDEX_COUNT = 0;
         is_cleaned_up = true;
     }
-    
-    void setVertices(const std::vector<float>& vertices) {
-        vertices_data = vertices;
-        vertex_count = vertices.size();
-    }
 };
-
-void cleanup_all_meshes() {
-    for (auto* mesh : global_mesh_registry) {
-        if (mesh && !mesh->is_cleaned_up) {
-            mesh->cleanup();
-        }
-    }
-    global_mesh_registry.clear();
-}
 
 // ============================================================================
 // ENTITY SYSTEM
 // ============================================================================
 
-typedef struct {
+struct Entity {
     std::string name;
     glm::vec3 position;
     glm::vec3 rotation;
     glm::vec3 scale;
-    std::vector<Mesh*> meshes;
+    std::vector<std::unique_ptr<Mesh>> meshes;
     int active;
-} Entity;
+};
 
 class EntityManager {
 private:
     std::vector<Entity> entities;
-    std::vector<bool> active_flags;
-
+    
 public:
-    size_t addEntity(const Entity& entity) {
-        entities.push_back(entity);
-        active_flags.push_back(true);
+    size_t addEntity(Entity&& entity) {
+        entities.push_back(std::move(entity));
         return entities.size() - 1;
     }
     
     bool updateEntity(std::string name, const glm::vec3& pos, const glm::vec3& rot, const glm::vec3& scale) {
         for (size_t i = 0; i < entities.size(); i++) {
-            if (active_flags[i] && entities[i].name == name) {
+            if (entities[i].active && entities[i].name == name) {
                 
                 // Positions
                 if (!isnan(pos.x)) entities[i].position.x = pos.x;
@@ -498,36 +484,19 @@ public:
     size_t size() const { return entities.size(); }
     
     Entity* getEntityAt(size_t index) {
-        if (index < entities.size() && active_flags[index]) {
+        if (index < entities.size() && entities[index].active) {
             return &entities[index];
         }
         return nullptr;
     }
     
-    void removeEntity(size_t index) {
-        if (index >= entities.size() || !active_flags[index]) return;
-        
-        Entity& entity = entities[index];
-        
-        // Subtract from triangle count
-        for (Mesh* mesh : entity.meshes) {
-            if (mesh) {
-                total_triangles -= mesh->TRIANGLE_COUNT;
-            }
-        }
-        
-        // Clear the mesh references (but don't delete the meshes themselves)
-        entity.meshes.clear();
-        
-        // Mark as inactive
-        active_flags[index] = false;
-    }
-
-    void removeEntity(const std::string& name) {
-        for (size_t i = 0; i < entities.size(); i++) {
-            if (active_flags[i] && entities[i].name == name) {
-                removeEntity(i);
-                return;
+    template <typename Pred>
+    void removeEntities(Pred&& pred) {
+        for (Entity& entity : entities) {
+            if (entity.active && pred(entity)) {
+                for (const auto& mesh : entity.meshes) total_triangles -= mesh->TRIANGLE_COUNT;
+                entity.meshes.clear();
+                entity.active = false;
             }
         }
     }
@@ -535,7 +504,8 @@ public:
 
 EntityManager entity_manager;
 
-void createEntity(std::string name, std::vector<Mesh*> meshes, glm::vec3 pos, glm::vec3 rotation, glm::vec3 scale, std::vector<int> cull_modes) {
+template<typename... Args>
+void createEntity(std::string name, std::vector<std::unique_ptr<Mesh>>&& meshes, glm::vec3 pos, glm::vec3 rotation, glm::vec3 scale, std::vector<int> cull_modes) {
     Entity entity;
     entity.name = name;
     entity.position = pos;
@@ -543,9 +513,7 @@ void createEntity(std::string name, std::vector<Mesh*> meshes, glm::vec3 pos, gl
     entity.rotation.y = rotation.y;
     entity.rotation.z = rotation.z;
     entity.scale = scale;
-    entity.meshes = meshes;
     entity.active = 1;
-    entity_manager.addEntity(entity);
     
     // Apply cull modes for individual submeshes
     for (size_t i = 0; i < meshes.size(); i++) {
@@ -561,87 +529,20 @@ void createEntity(std::string name, std::vector<Mesh*> meshes, glm::vec3 pos, gl
         }
     }
     
+    // Count triangles then move memory address
     unsigned int mesh_triangles = 0;
-    for (Mesh* mesh : meshes) {
-        if (mesh) mesh_triangles += mesh->TRIANGLE_COUNT;
+    for (const auto& mesh : meshes) {
+        if (mesh) {
+            mesh_triangles += mesh->TRIANGLE_COUNT;
+        }
     }
     total_triangles += mesh_triangles;
     
     printf("Created entity '%s' with %zu submeshes (triangles: %u)\n",
            name.c_str(), meshes.size(), mesh_triangles);
-}
-
-// ============================================================================
-// LIGHTING SYSTEM
-// ============================================================================
-
-// Add an enum to classify light types
-typedef enum {
-    POINT_LIGHT = 0,
-    SPOT_LIGHT = 1
-} LightType;
-
-typedef struct {
-    glm::vec3 position;
-    glm::vec3 color;
-    float intensity;
     
-    // Spotlight-specific parameters
-    glm::vec3 direction;
-    glm::vec3 initial_direction;
-    glm::vec3 euler_rotation;
-    float inner_cutoff_cos;
-    float outer_cutoff_cos;
-    int type;
-    
-    std::string entity_name;
-} Light;
-
-std::vector<Light> lights;
-
-void createSpotlight(std::string name, glm::vec3 position, glm::vec3 color, float intensity,
-                     glm::vec3 initial_direction, float inner_angle_deg, float outer_angle_deg, glm::vec3 rotation,
-                     std::vector<Mesh*> light_mesh, glm::vec3 scale, std::vector<int> cull_mode) {
-    Light light;
-    light.position = position;
-    light.color = color;
-    light.intensity = intensity;
-    
-    // Store the initial/local direction and rotation
-    light.initial_direction = glm::normalize(initial_direction);
-    light.euler_rotation = rotation;
-    
-    // The `light.direction` that gets sent to the shader will be calculated
-    // just before rendering (see step 3). For now, initialize it.
-    light.direction = glm::normalize(initial_direction);
-    
-    light.inner_cutoff_cos = glm::cos(glm::radians(inner_angle_deg));
-    light.outer_cutoff_cos = glm::cos(glm::radians(outer_angle_deg));
-    light.type = SPOT_LIGHT;
-
-    light.entity_name = name;
-    lights.push_back(light);
-    
-    // The light's entity also needs to be created with the rotation
-    createEntity(light.entity_name, light_mesh, position, rotation, scale, cull_mode);
-}
-
-void createPointLight(std::string name, glm::vec3 position, glm::vec3 color, float intensity,
-                      std::vector<Mesh*> light_mesh, glm::vec3 scale, std::vector<int> cull_mode) {
-    Light light;
-    light.position = position;
-    light.color = color;
-    light.intensity = intensity;
-    
-    // Set spotlight properties and convert angles to cosine
-    light.direction = glm::vec3(0.0f, -1.0f, 0.0f);
-    light.inner_cutoff_cos = -1.0f;
-    light.outer_cutoff_cos = -1.0f;
-    light.type = POINT_LIGHT;
-    
-    light.entity_name = name;
-    lights.push_back(light);
-    createEntity(light.entity_name, light_mesh, position, light.direction, scale, std::vector<int> {CULL_BACK});
+    entity.meshes = std::move(meshes);
+    entity_manager.addEntity(std::move(entity));
 }
 
 // ============================================================================
@@ -674,7 +575,7 @@ Camera create_camera(float aspect) {
     cam.fov = glm::radians(45.0f);
     cam.aspect_ratio = aspect;
     cam.near_plane = 0.1f;
-    cam.far_plane = 500.0f;
+    cam.far_plane = 100.0f;
     return cam;
 }
 
@@ -684,8 +585,8 @@ void camera_update_vectors(Camera* cam) {
     cam->front.z = sin(glm::radians(cam->yaw)) * cos(glm::radians(cam->pitch));
     cam->front = glm::normalize(cam->front);
 
-    cam->right = glm::normalize(cross(cam->front, glm::vec3(0, 1, 0)));
-    cam->up = glm::normalize(cross(cam->right, cam->front));
+    cam->right = glm::normalize(glm::cross(cam->front, glm::vec3(0, 1, 0)));
+    cam->up = glm::normalize(glm::cross(cam->right, cam->front));
 }
 
 glm::mat4 camera_get_projection(Camera* cam) {
@@ -693,7 +594,108 @@ glm::mat4 camera_get_projection(Camera* cam) {
 }
 
 glm::mat4 camera_get_view_matrix(Camera* cam) {
-    return lookAt(cam->position, cam->position + cam->front, cam->up);
+    return glm::lookAt(cam->position, cam->position + cam->front, cam->up);
+}
+
+// ============================================================================
+// LIGHTING SYSTEM
+// ============================================================================
+
+// Add an enum to classify light types
+typedef enum {
+    DIR_LIGHT = 0,
+    POINT_LIGHT = 1,
+    SPOT_LIGHT = 2,
+} LightType;
+
+typedef struct {
+    glm::vec3 position;
+    glm::vec3 color;
+    int intensity;
+    
+    // Spotlight-specific parameters
+    glm::vec3 direction;
+    glm::vec3 initial_direction;
+    glm::vec3 euler_rotation;
+    float inner_cutoff_cos;
+    float outer_cutoff_cos;
+    int type;
+    
+    std::string entity_name;
+} Light;
+
+std::vector<Light> lights;
+
+// Helper function for directional lights
+glm::mat4 computeDirLightSpaceMatrix (const glm::vec3& direction, const Camera& cam, float halfSize, float zNear, float zFar) {
+    glm::vec3 L = glm::normalize(direction); // light shines in –L
+    glm::vec3 up = std::abs(L.y) > 0.999f ? glm::vec3(0,0,1)
+                                          : glm::vec3(0,1,0);
+    glm::mat4 V = glm::lookAt(cam.position - L * zFar * 0.5f,
+                              cam.position, up);
+    glm::mat4 P = glm::ortho(-halfSize, halfSize,
+                             -halfSize, halfSize,
+                             zNear, zFar);
+    return P * V;
+}
+
+void createDirLight(std::string name, glm::vec3 direction, glm::vec3 color, int intensity) {
+    Light light;
+    light.position = direction * 1000.0f;
+    light.color = color;
+    light.intensity = intensity * 1000;
+    
+    // Set spotlight-only settings to invalid
+    light.direction = glm::vec3(0.0f, -1.0f, 0.0f);
+    light.inner_cutoff_cos = -1.0f;
+    light.outer_cutoff_cos = -1.0f;
+    light.type = DIR_LIGHT;
+    
+    light.entity_name = name;
+    lights.push_back(light);
+}
+
+void createSpotlight(std::string name, glm::vec3 position, glm::vec3 color, int intensity,
+                     glm::vec3 initial_direction, float inner_angle_deg, float outer_angle_deg, glm::vec3 rotation,
+                     std::vector<std::unique_ptr<Mesh>>&& light_mesh, glm::vec3 scale, std::vector<int> cull_mode) {
+    Light light;
+    light.position = position;
+    light.color = color;
+    light.intensity = intensity;
+    
+    // Store the initial/local direction and rotation
+    light.initial_direction = glm::normalize(initial_direction);
+    light.euler_rotation = rotation;
+    
+    light.direction = glm::normalize(initial_direction);
+    
+    light.inner_cutoff_cos = glm::cos(glm::radians(inner_angle_deg));
+    light.outer_cutoff_cos = glm::cos(glm::radians(outer_angle_deg));
+    light.type = SPOT_LIGHT;
+
+    light.entity_name = name;
+    lights.push_back(light);
+    
+    // The light's entity also needs to be created with the rotation
+    createEntity(light.entity_name, std::move(light_mesh), position, rotation, scale, cull_mode);
+}
+
+void createPointLight(std::string name, glm::vec3 position, glm::vec3 color, int intensity,
+                      std::vector<std::unique_ptr<Mesh>>&& light_mesh, glm::vec3 scale, std::vector<int> cull_mode) {
+    Light light;
+    light.position = position;
+    light.color = color;
+    light.intensity = intensity;
+    
+    // Set spotlight-only settings to invalid
+    light.direction = glm::vec3(0.0f, -1.0f, 0.0f);
+    light.inner_cutoff_cos = -1.0f;
+    light.outer_cutoff_cos = -1.0f;
+    light.type = POINT_LIGHT;
+    
+    light.entity_name = name;
+    lights.push_back(light);
+    createEntity(light.entity_name, std::move(light_mesh), position, light.direction, scale, cull_mode);
 }
 
 // ============================================================================
@@ -849,29 +851,31 @@ layout (location = 5) in vec3 aBitangent;
 out vec4 vertexColor;
 out vec2 TexCoord;
 out vec3 FragPos;
-out vec3 Normal;
+out vec3 Normal; // Normal in world space
 out vec4 FragPosLightSpace;
-out mat3 TBN;  // Tangent-Bitangent-Normal matrix for normal mapping
+out mat3 TBN; // Tangent-Bitangent-Normal matrix in world space
 
 uniform mat4 model;
 uniform mat4 view;
 uniform mat4 projection;
-uniform mat3 normalMatrix;
+uniform mat3 normalMatrix; // Inverse transpose of the model matrix
 uniform mat4 lightSpaceMatrix;
 
 void main() {
     FragPos = vec3(model * vec4(aPos, 1.0));
-    Normal = normalMatrix * aNormal;
+    Normal = normalMatrix * aNormal; // Use normalMatrix for correct Normal
     gl_Position = projection * view * vec4(FragPos, 1.0);
+    
     TexCoord = aTexCoords;
     vertexColor = aColor;
     FragPosLightSpace = lightSpaceMatrix * vec4(FragPos, 1.0);
     
-    // Construct TBN matrix for normal mapping
-    vec3 T = normalize(vec3(model * vec4(aTangent, 0.0)));
-    vec3 B = normalize(vec3(model * vec4(aBitangent, 0.0)));
-    vec3 N = normalize(vec3(model * vec4(aNormal, 0.0)));
-    TBN = mat3(T, B, N);
+    // Construct TBN matrix    
+    vec3 T = normalize(normalMatrix * aTangent);
+    vec3 B = normalize(normalMatrix * aBitangent);
+    vec3 N_TBN = normalize(Normal); // Use the already calculated world space normal
+    
+    TBN = mat3(T, B, N_TBN);
 }
 )";
 
@@ -881,44 +885,41 @@ void main() {
 
 const std::string pbr_fragment_shader = R"(
 #version 330 core
-
 in vec4 vertexColor;
 in vec2 TexCoord;
 in vec3 FragPos;
 in vec3 Normal;
 in vec4 FragPosLightSpace;
-in mat3 TBN;
+in mat3 TBN;          // Rows: T, B, N (world to tangent)
 
 out vec4 FragColor;
 
-// Textures
+// Samplers
 uniform sampler2D albedoMap;
 uniform sampler2D normalMap;
-uniform sampler2D metallicMap;
-uniform sampler2D roughnessMap;
-uniform sampler2D aoMap;
+uniform sampler2D ormMap; // R = AO  G = Roughness  B = Metallic  A = Height
 uniform sampler2D emissiveMap;
 uniform sampler2D shadowMap;
 
-// Material properties (used if maps are not present)
+// Materials
 uniform vec3 baseColor;
 uniform float metallic;
 uniform float roughness;
 uniform vec3 emissive;
+uniform float heightScale;
 
-// Texture presence flags
 uniform bool hasAlbedoMap;
 uniform bool hasNormalMap;
-uniform bool hasMetallicMap;
-uniform bool hasRoughnessMap;
-uniform bool hasAOMap;
 uniform bool hasEmissiveMap;
+uniform bool hasORMMap;
+uniform bool hasHeightMap;
 
 // Lighting
-#define MAX_LIGHTS 16
+#define MAX_LIGHTS 8
 uniform int lightCount;
 uniform vec3 viewPos;
-uniform int shadowLightIndex;
+uniform int  shadowLightIndex;
+
 uniform vec3 lightPositions[MAX_LIGHTS];
 uniform vec3 lightColors[MAX_LIGHTS];
 uniform float lightIntensities[MAX_LIGHTS];
@@ -929,191 +930,165 @@ uniform float lightTypes[MAX_LIGHTS];
 
 const float PI = 3.14159265359;
 
-// Normal Distribution Function (GGX/Trowbridge-Reitz)
-// Determines how much the surface's microfacets are aligned with the halfway vector
-float DistributionGGX(vec3 N, vec3 H, float roughness) {
-    float a = roughness * roughness;
-    float a2 = a * a;
-    float NdotH = max(dot(N, H), 0.0);
-    float NdotH2 = NdotH * NdotH;
-    
-    float num = a2;
-    float denom = (NdotH2 * (a2 - 1.0) + 1.0);
-    denom = PI * denom * denom;
-    
-    return num / denom;
+// PARALLAX OCCLUSION MAPPING (POM)
+vec2 parallaxMapping(vec2 uv, vec3 Vts) {
+    const float minLayers = 8.0;
+    const float maxLayers = 32.0;
+    float numLayers = mix(maxLayers, minLayers, abs(Vts.z));   // more layers when grazing
+    float layerDepth = 1.0 / numLayers;
+    vec2 deltaUV = Vts.xy * heightScale / numLayers;
+
+    float currDepth = 0.0;
+    vec2  currUV = uv;
+    float height = texture(ormMap, currUV).a;
+
+    // Ray-march until we go *below* the surface
+    for (float i = 0.0; i < numLayers; ++i) {
+        currUV -= deltaUV;
+        height = texture(ormMap, currUV).a;
+        currDepth += layerDepth;
+        if (currDepth >= height) break;
+    }
+
+    // Refine with a second linear step
+    vec2 prevUV = currUV + deltaUV;
+    float prevH = texture(ormMap, prevUV).a;
+    float nextH = height;
+    float w = (currDepth - currDepth + layerDepth - prevH) / (nextH - prevH + 1e-4);
+    currUV = mix(prevUV, currUV, w);
+
+    return currUV;
 }
 
-// Geometry Function (Schlick-GGX)
-// Describes self-shadowing of microfacets
-float GeometrySchlickGGX(float NdotV, float roughness) {
-    float r = (roughness + 1.0);
-    float k = (r * r) / 8.0;
-    
-    float num = NdotV;
-    float denom = NdotV * (1.0 - k) + k;
-    
-    return num / denom;
+// SHADOW MAPPING
+
+float calcShadow(vec4 fragLight, vec3 N, vec3 L) {
+    if (shadowLightIndex < 0) return 0.0;
+
+    // Project shadow
+    vec3 proj = fragLight.xyz / fragLight.w;
+    proj = proj * 0.5 + 0.5;
+
+    if (proj.z > 1.0) return 0.0;
+
+    // Apply bias to account for self-shadowing acne
+    float bias = max(0.2 * tan(acos(dot(N, L))), 0.02);
+    vec3 shadowPos = vec3(fragLight) + L * bias; // Push vertex along normal
+    proj.z = (shadowPos.z / fragLight.w) * 0.5 + 0.5 - bias; // Apply to depth
+
+    float shadow = 0.0;
+    vec2 texel = 1.0 / textureSize(shadowMap, 0);
+    for (int x = -1; x <= 1; ++x) {
+        for (int y = -1; y <= 1; ++y) {
+            shadow += texture(shadowMap, proj.xy + vec2(x,y) * texel).r < proj.z ? 1.0 : 0.0;
+        }
+    }
+    shadow /= 9.0;
+
+    // Soft border fade
+    vec2 border = min(proj.xy, 1.0 - proj.xy);
+    float fade  = smoothstep(0.0, 0.1, min(border.x, border.y));
+    return mix(0.0, shadow, fade);
 }
 
-// Smith's method for geometry obstruction
-float GeometrySmith(vec3 N, vec3 V, vec3 L, float roughness) {
-    float NdotV = max(dot(N, V), 0.0);
-    float NdotL = max(dot(N, L), 0.0);
-    float ggx2 = GeometrySchlickGGX(NdotV, roughness);
-    float ggx1 = GeometrySchlickGGX(NdotL, roughness);
-    
-    return ggx1 * ggx2;
-}
-
-// Fresnel-Schlick Approximation
+// BRDF PBR
 vec3 fresnelSchlick(float cosTheta, vec3 F0) {
     return F0 + (1.0 - F0) * pow(clamp(1.0 - cosTheta, 0.0, 1.0), 5.0);
 }
 
-float ShadowCalculation(vec4 fragPosLightSpace, vec3 normal, vec3 lightDir) {
-    vec3 projCoords = fragPosLightSpace.xyz / fragPosLightSpace.w;
-    projCoords = projCoords * 0.5 + 0.5;
-    
-    if (projCoords.z > 1.0) return 1.0;
-    
-    vec2 edgeDistance = min(projCoords.xy, 1.0 - projCoords.xy);
-    float minEdgeDist = min(edgeDistance.x, edgeDistance.y);
-    float fadeStart = 0.15;
-    float edgeFade = smoothstep(0.0, fadeStart, minEdgeDist);
-    
-    if (projCoords.x < 0.0 || projCoords.x > 1.0 || 
-        projCoords.y < 0.0 || projCoords.y > 1.0) {
-        return 1.0;
-    }
-    
-    if (edgeFade < 0.01) return 1.0;
-    
-    float closestDepth = texture(shadowMap, projCoords.xy).r;
-    float currentDepth = projCoords.z;
-    float bias = max(0.00005 * (1.0 - dot(normal, lightDir)), 0.0005);
-    
-    float shadow = 0.0;
-    vec2 texelSize = 1.0 / textureSize(shadowMap, 0);
-    int pcfKernelSize = 2;
-    for (int x = -pcfKernelSize; x <= pcfKernelSize; ++x) {
-        for (int y = -pcfKernelSize; y <= pcfKernelSize; ++y) {
-            float pcfDepth = texture(shadowMap, projCoords.xy + vec2(x, y) * texelSize).r;
-            shadow += currentDepth - bias > pcfDepth ? 1.0 : 0.0;
-        }
-    }
-    shadow /= (pcfKernelSize * 2 + 1) * (pcfKernelSize * 2 + 1);
-    shadow = mix(1.0, shadow, edgeFade);
-    
-    return shadow;
+float D_GGX(vec3 N, vec3 H, float a2) {
+    float NdotH = max(dot(N, H), 0.0);
+    float denom = NdotH*NdotH * (a2 - 1.0) + 1.0;
+    return a2 / (PI * denom * denom);
 }
 
-void main() {
-    vec4 texColor = texture(albedoMap, TexCoord);
-    
-    if (texColor.a < 0.5) discard;
-    
-    // Sample textures
-    vec3 albedo = hasAlbedoMap ? texture(albedoMap, TexCoord).rgb : baseColor;
-    float metallicValue = hasMetallicMap ? texture(metallicMap, TexCoord).r : metallic;
-    float roughnessValue = hasRoughnessMap ? texture(roughnessMap, TexCoord).r : roughness;
-    float ao = hasAOMap ? texture(aoMap, TexCoord).r : 1.0;
-    vec3 emissiveValue = hasEmissiveMap ? texture(emissiveMap, TexCoord).rgb : emissive;
-    
-    // Get normal from normal map or use vertex normal
-    vec3 N;
-    if (hasNormalMap) {
-        // Sample normal map and transform from [0,1] to [-1,1]
-        N = texture(normalMap, TexCoord).rgb;
-        N = N * 2.0 - 1.0;
-        N = normalize(TBN * N);  // Transform to world space
-    } else {
-        N = normalize(Normal);
-    }
-    
-    // Determine if face is facing towards or away from camera
-    if (!gl_FrontFacing) {
-        N = -N; 
-    }
-    
-    vec3 V = normalize(viewPos - FragPos);
-    
-    // Calculate reflectance at normal incidence (F0)
-    // For dielectrics (non-metals), F0 is typically 0.04
-    // For metals, F0 is the albedo color
-    vec3 F0 = vec3(0.04);
-    F0 = mix(F0, albedo, metallicValue);
-    
-    // Reflectance equation
-    vec3 Lo = vec3(0.0);
-    
-    for (int i = 0; i < lightCount && i < MAX_LIGHTS; i++) {
-        // Calculate per-light radiance
-        vec3 L = normalize(lightPositions[i] - FragPos);
-        vec3 H = normalize(V + L);
-        float distance = length(lightPositions[i] - FragPos);
-        float attenuation = 1.0 / (distance * distance);
-        vec3 radiance = lightColors[i] * lightIntensities[i] * attenuation;
-        
-        float spot_intensity = 1.0;
+float G_Schlick(float NdotV, float k) {
+    return NdotV / (NdotV * (1.0 - k) + k);
+}
 
-        // Check if the current light is a spotlight
-        if (lightTypes[i] == 1.0) {
-            vec3 fragmentToLightDir = -L;
-            
-            float theta = dot(fragmentToLightDir, lightDirections[i]);
-            
-            float inner_cos = lightInnerCutoffs[i];
-            float outer_cos = lightOuterCutoffs[i];
-            
-            // Check if outside the outer cone
-            if (theta < outer_cos) {
-                spot_intensity = 0.0;
-            }
-            // Check if inside the soft falloff region
-            else if (theta < inner_cos) {
-                float epsilon = inner_cos - outer_cos;
-                spot_intensity = clamp((theta - outer_cos) / epsilon, 0.0, 1.0);
-            }
-            radiance *= spot_intensity;
+float G_Smith(vec3 N, vec3 V, vec3 L, float rough) {
+    float k = (rough + 1.0) * (rough + 1.0) / 8.0;
+    return G_Schlick(max(dot(N, L), 0.0), k) * G_Schlick(max(dot(N, V), 0.0), k);
+}
+
+// MAIN LOOP
+void main() {
+    // Tangent-space POM
+    vec3 Vworld = normalize(viewPos - FragPos);
+    vec3 Vts = normalize(transpose(TBN) * Vworld); // View dir in tangent space
+    vec2 uv;
+    if (!hasHeightMap) {
+        uv = TexCoord;
+    } else {
+        uv = parallaxMapping(TexCoord, Vts);
+    }
+
+    // Sample texture
+    vec4 albedoS = hasAlbedoMap ? texture(albedoMap, uv) : vec4(baseColor, 1.0);
+    if (albedoS.a < 0.5) discard;
+
+    vec3 albedo = albedoS.rgb;
+    vec4 orm = hasORMMap ? texture(ormMap, uv) : vec4(1.0, roughness, metallic, 0.5);
+    float ao = orm.r;
+    float rough = orm.g;
+    float metal = orm.b;
+
+    vec3 emissiveCol = hasEmissiveMap ? texture(emissiveMap, uv).rgb : emissive;
+
+    vec3 N = normalize(Normal);
+    if (hasNormalMap) {
+        vec3 nt = texture(normalMap, uv).rgb * 2.0 - 1.0;
+        N = normalize(TBN * nt);
+    }
+    
+    // Flip normal if facing away
+    if (!gl_FrontFacing) N = -N;
+
+    vec3 V = normalize(Vworld);
+    vec3 F0 = mix(vec3(0.04), albedo, metal);
+    vec3 Lo = vec3(0.0);
+
+    for (int i = 0; i < lightCount && i < MAX_LIGHTS; ++i) {
+        // Calculate vector based on whether light is directional or not
+        vec3 L = (lightTypes[i] < 0.5) ? normalize(-lightPositions[i]) : normalize(lightPositions[i] - FragPos);
+        vec3 H = normalize(V + L);
+        float dist = length(lightPositions[i] - FragPos);
+        float att = 1.0 / (dist * dist);
+        vec3 radiance = lightColors[i] * lightIntensities[i] * att;
+
+        // Spotlight attenuation
+        if (lightTypes[i] > 0.5) {
+            float theta = dot(-L, lightDirections[i]);
+            float eps = lightInnerCutoffs[i] - lightOuterCutoffs[i];
+            float spot = clamp((theta - lightOuterCutoffs[i]) / eps, 0.0, 1.0);
+            radiance *= spot;
         }
-                
-        // Cook-Torrance BRDF
-        float NDF = DistributionGGX(N, H, roughnessValue);
-        float G = GeometrySmith(N, V, L, roughnessValue);
+
+        // Cook-torrance
+        float NDF = D_GGX(N, H, rough * rough);
+        float G = G_Smith(N, V, L, rough);
         vec3 F = fresnelSchlick(max(dot(H, V), 0.0), F0);
-        
-        vec3 kS = F;  // Specular contribution
-        vec3 kD = vec3(1.0) - kS;  // Diffuse contribution
-        kD *= 1.0 - metallicValue;  // Metals have no diffuse
-        
+
+        vec3 kS = F;
+        vec3 kD = vec3(1.0) - kS;
+        kD *= 1.0 - metal;
+
         vec3 numerator = NDF * G * F;
-        float denominator = 4.0 * max(abs(dot(N, V)), 0.0) * max(dot(N, L), 0.0) + 0.0001;
-        vec3 specular = numerator / denominator;
-        
-        // Add to outgoing radiance Lo
+        float denom = 4.0 * max(dot(N, V), 0.0) * max(dot(N, L), 0.0) + 0.0001;
+        vec3 specular = numerator / denom;
+
+        float shadow = (i == shadowLightIndex) ? calcShadow(FragPosLightSpace, N, L) : 0.0;
         float NdotL = max(dot(N, L), 0.0);
-        
-        // Apply shadows for the shadow-casting light
-        float shadow = 0.0;
-        if (i == shadowLightIndex) {
-            shadow = ShadowCalculation(FragPosLightSpace, N, L);
-        }
-        
         Lo += (kD * albedo / PI + specular) * radiance * NdotL * (1.0 - shadow);
     }
-    
-    // Ambient lighting
+
     vec3 ambient = vec3(0.03) * albedo * ao;
-    
-    vec3 color = ambient + Lo + emissiveValue;
-    
-    // HDR tonemapping (Reinhard)
+    vec3 color   = ambient + Lo + emissiveCol;
+
+    // Tonemap & gamma correction
     color = color / (color + vec3(1.0));
-    
-    // Gamma correction
     color = pow(color, vec3(1.0/2.2));
-    
+
     FragColor = vec4(color, 1.0);
 }
 )";
@@ -1260,7 +1235,7 @@ static const float SKYBOX_VERTICES[] = {
 class Skybox {
 public:
     GLuint VAO, VBO;
-    GLuint cubemap_texture;
+    std::vector<GLuint> cubemap_texture;
     std::unique_ptr<Shader> skybox_shader;
     
     Skybox() : VAO(0), VBO(0), cubemap_texture(0) {}
@@ -1269,16 +1244,8 @@ public:
         cleanup();
     }
     
-    void init(const char* faces[6]) {
-        try {
-            skybox_shader = std::make_unique<Shader>(skybox_vertex_shader, skybox_fragment_shader);
-            printf("Skybox shaders created successfully. %u\n", skybox_shader->getProgram());
-        } catch (const std::exception& e) {
-            printf("Failed to create skybox shaders: %s\n", e.what());
-            throw;
-        }
-        
-        cubemap_texture = loadCubemap(faces);
+    void bindSkybox(const char* faces[6]) {
+        cubemap_texture.push_back(loadCubemap(faces));
         
         glGenVertexArrays(1, &VAO);
         glGenBuffers(1, &VBO);
@@ -1291,6 +1258,16 @@ public:
         glEnableVertexAttribArray(0);
         
         glBindVertexArray(0);
+    }
+    
+    void initShader() {
+        try {
+            skybox_shader = std::make_unique<Shader>(skybox_vertex_shader, skybox_fragment_shader);
+            printf("Skybox shaders created successfully. %u\n", skybox_shader->getProgram());
+        } catch (const std::exception& e) {
+            printf("Failed to create skybox shaders: %s\n", e.what());
+            throw;
+        }
     }
     
     void render(Camera* camera) {
@@ -1309,7 +1286,7 @@ public:
         
         glBindVertexArray(VAO);
         glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_CUBE_MAP, cubemap_texture);
+        glBindTexture(GL_TEXTURE_CUBE_MAP, cubemap_texture[skyboxID]);
         skybox_shader->setInt("skybox", 0);
         
         glDrawArrays(GL_TRIANGLES, 0, 36);
@@ -1323,9 +1300,13 @@ public:
     void cleanup() {
         if (VAO != 0) glDeleteVertexArrays(1, &VAO);
         if (VBO != 0) glDeleteBuffers(1, &VBO);
-        if (cubemap_texture != 0) glDeleteTextures(1, &cubemap_texture);
-        
-        VAO = VBO = cubemap_texture = 0;
+        for (size_t i = 0; i < cubemap_texture.size(); i++) {
+            if (cubemap_texture[i] != 0) {
+                glDeleteTextures(1, &cubemap_texture[i]);
+                cubemap_texture[i] = 0;
+            }
+        }
+        VAO = VBO = 0;
     }
 };
 
@@ -1361,46 +1342,37 @@ public:
         glBindFramebuffer(GL_FRAMEBUFFER, shadowMapFBO);
         glClear(GL_DEPTH_BUFFER_BIT);
         
-        glm::vec3 lightPos = light.position;
-        
         glm::mat4 lightProjection;
-        glm::vec3 up;
-        glm::vec3 finalLightDir;
         
         if (light.type == SPOT_LIGHT) {
             // Move along the light's actual direction vector
-            glm::vec3 lightTarget = lightPos + light.direction;
-            
-            finalLightDir = light.direction;
+            glm::vec3 lightTarget = light.position + light.direction;
+            glm::vec3 finalDir = light.direction;
             
             // Choose up vector dynamically based on the calculated light direction
-            if (abs(finalLightDir.y) > 0.99f) {
-                up = glm::vec3(1.0f, 0.0f, 0.0f);
-            } else {
-                up = glm::vec3(0.0f, 1.0f, 0.0f);
-            }
+            glm::vec3 up = glm::abs(finalDir.y) > 0.99f ? glm::vec3(0, 0, 1) : glm::vec3(0, 1, 0);
             
-            glm::mat4 lightView = glm::lookAt(lightPos, lightTarget, up);
-            
+            glm::mat4 lightView = glm::lookAt(light.position, lightTarget, up);
             float outerAngle = glm::degrees(glm::acos(light.outer_cutoff_cos));
             lightProjection = glm::perspective(glm::radians(outerAngle * 2.0f), 1.0f, 0.5f, 100.0f);
             
             lightSpaceMatrix = lightProjection * lightView;
             
-        } else {
+        } else if (light.type == POINT_LIGHT) {
             // Omni-directional point light
-            lightProjection = glm::perspective(glm::radians(90.0f), 1.0f, 0.5f, 100.0f);
             glm::vec3 lightTarget = glm::vec3(0.0f, 0.0f, 0.0f);
-            finalLightDir = glm::normalize(lightTarget - lightPos);
+            glm::vec3 finalDir = glm::normalize(lightTarget - light.position);
+
+            glm::vec3 up = glm::abs(finalDir.y) > 0.99f ? glm::vec3(0, 0, 1) : glm::vec3(0, 1, 0);
             
-            if (abs(finalLightDir.y) > 0.99f) {
-                up = glm::vec3(1.0f, 0.0f, 0.0f);
-            } else {
-                up = glm::vec3(0.0f, 1.0f, 0.0f);
-            }
-            glm::mat4 lightView = glm::lookAt(lightPos, lightTarget, up);
+            lightProjection = glm::perspective(glm::radians(90.0f), 1.0f, 0.5f, 100.0f);
+            glm::mat4 lightView = glm::lookAt(light.position, lightTarget, up);
             
             lightSpaceMatrix = lightProjection * lightView;
+            
+        } else if (light.type == DIR_LIGHT) {
+            // Directional light
+            lightSpaceMatrix = computeDirLightSpaceMatrix(light.position, global_camera, 40.0f, 0.1f, 200.0f);
         }
         
         shadow_shader->use();
@@ -1420,7 +1392,7 @@ public:
                 if (is_light_entity) {
                     continue;  // Skip rendering this entity in shadow pass
                 }
-                for (Mesh* mesh : entity->meshes) {
+                for (const auto& mesh : entity->meshes) {
                     if (mesh && mesh->isValid()) {
                         // Apply mesh-specific culling
                         if (mesh->cull_mode == CULL_NONE) {
@@ -1440,7 +1412,7 @@ public:
                         shadow_shader->setMat4("model", model);
                         
                         // Bind texture for shadow shaders to test alpha values in texture
-                        GLuint texture_to_use = (mesh->texture_id != 0) ? mesh->texture_id : default_texture_id;
+                        GLuint texture_to_use = mesh->material.hasAlbedoMap() ? mesh->material.albedo_map : default_texture_id;
                         glActiveTexture(GL_TEXTURE0);
                         glBindTexture(GL_TEXTURE_2D, texture_to_use);
                         shadow_shader->setInt("u_texture", 0);
@@ -1471,9 +1443,7 @@ public:
             rotationMatrix = glm::rotate(rotationMatrix, glm::radians(light.euler_rotation.y), glm::vec3(0.0f, 1.0f, 0.0f)); // Yaw
             rotationMatrix = glm::rotate(rotationMatrix, glm::radians(light.euler_rotation.x), glm::vec3(1.0f, 0.0f, 0.0f)); // Pitch
             rotationMatrix = glm::rotate(rotationMatrix, glm::radians(light.euler_rotation.z), glm::vec3(0.0f, 0.0f, 1.0f)); // Roll
-            
-            glm::vec3 world_direction = glm::normalize(glm::vec3(rotationMatrix * glm::vec4(light.initial_direction, 0.0f)));
-            
+                        
             positions.push_back(light.position);
             colors.push_back(light.color);
             intensities.push_back(light.intensity);
@@ -1496,15 +1466,16 @@ public:
         pbr_shader->setFloatArray("lightTypes", types);
     }
     
-    void drawEntity(Entity* entity, const Camera& camera, const std::vector<Light>& lights, int shadowLightIndex) {
+    void drawEntity(Entity* entity, const Camera& camera, int shadowLightIndex) {
         if (!entity->active) return;
         
-        for (Mesh* mesh : entity->meshes) {
-            drawMesh(entity, mesh, camera, lights, shadowLightIndex);
+        for (const auto& meshPtr : entity->meshes) {
+            Mesh* mesh = meshPtr.get();
+            drawMesh(entity, mesh, camera, shadowLightIndex);
         }
     }
     
-    void drawMesh(Entity* entity, Mesh* mesh, const Camera& camera, const std::vector<Light>& lights, int shadowLightIndex) {
+    void drawMesh(Entity* entity, Mesh* mesh, const Camera& camera, int shadowLightIndex) {
         if (!entity->active || mesh->TRIANGLE_COUNT == 0 || !mesh->isValid()) {
             return;
         }
@@ -1582,32 +1553,16 @@ public:
         pbr_shader->setInt("hasNormalMap", mesh->material.hasNormalMap());
         texture_unit++;
         
-        // Metallic map
+        // ORM map
         glActiveTexture(GL_TEXTURE0 + texture_unit);
-        GLuint metallic_to_use = mesh->material.hasMetallicMap() ?
-        mesh->material.metallic_map : default_texture_id;
-        glBindTexture(GL_TEXTURE_2D, metallic_to_use);
-        pbr_shader->setInt("metallicMap", texture_unit);
-        pbr_shader->setInt("hasMetallicMap", mesh->material.hasMetallicMap());
-        texture_unit++;
-        
-        // Roughness map
-        glActiveTexture(GL_TEXTURE0 + texture_unit);
-        GLuint roughness_to_use = mesh->material.hasRoughnessMap() ?
-        mesh->material.roughness_map : default_texture_id;
-        glBindTexture(GL_TEXTURE_2D, roughness_to_use);
-        pbr_shader->setInt("roughnessMap", texture_unit);
-        pbr_shader->setInt("hasRoughnessMap", mesh->material.hasRoughnessMap());
-        texture_unit++;
-        
-        // AO map
-        glActiveTexture(GL_TEXTURE0 + texture_unit);
-        GLuint ao_to_use = mesh->material.hasAOMap() ?
-        mesh->material.ao_map : default_texture_id;
-        glBindTexture(GL_TEXTURE_2D, ao_to_use);
-        pbr_shader->setInt("aoMap", texture_unit);
-        pbr_shader->setInt("hasAOMap", mesh->material.hasAOMap());
-        texture_unit++;
+        if (mesh->material.hasORMMap()) {
+            glBindTexture(GL_TEXTURE_2D, mesh->material.orm_map);
+        } else {
+            glBindTexture(GL_TEXTURE_2D, default_texture_id);
+        }
+        pbr_shader->setInt("ormMap", texture_unit);
+        pbr_shader->setFloat("heightScale", mesh->material.height_scale);
+        pbr_shader->setInt("hasHeightMap", mesh->material.hasORMMap());
         
         // Emissive map
         glActiveTexture(GL_TEXTURE0 + texture_unit);
@@ -1632,7 +1587,7 @@ public:
         glActiveTexture(GL_TEXTURE0);
     }
     
-    void drawUnlitMesh(Entity* entity, Mesh* mesh, const glm::vec3& color, float intensity = 1.0f) {
+    void drawUnlitMesh(Entity* entity, Mesh* mesh, const glm::vec3& color, int intensity) {
         if (!entity->active || mesh->TRIANGLE_COUNT == 0 || !mesh->isValid()) {
             return;
         }
@@ -1656,7 +1611,7 @@ public:
         unlit_shader->setMat4("view", view);
         unlit_shader->setMat4("projection", projection);
         unlit_shader->setVec3("emissiveColor", color);
-        unlit_shader->setFloat("emissiveIntensity", intensity * 0.001);
+        unlit_shader->setFloat("emissiveIntensity", intensity);
         
         // Draw
         glBindVertexArray(mesh->VAO);
@@ -1731,8 +1686,7 @@ void calculateTangentBitangent(
     bitangent.z = f * (-deltaUV2.x * edge1.z + deltaUV1.x * edge2.z);
 }
 
-// Updated loadOBJWithMTL function (replace your existing one)
-std::vector<Mesh*> loadOBJWithMTL(const std::string& obj_path) {
+std::vector<std::unique_ptr<Mesh>> loadOBJWithMTL(const std::string& obj_path) {
     std::ifstream file(obj_path);
     if (!file.is_open()) {
         std::cerr << "Error: Cannot open file " << obj_path << std::endl;
@@ -1885,7 +1839,7 @@ std::vector<Mesh*> loadOBJWithMTL(const std::string& obj_path) {
     }
 
     // Create meshes
-    std::vector<Mesh*> meshes;
+    std::vector<std::unique_ptr<Mesh>> meshes;
     for (const auto& pair : unique_vertices) {
         const std::string& mat_name = pair.first;
         const std::vector<Vertex>& vertices = pair.second;
@@ -1895,7 +1849,6 @@ std::vector<Mesh*> loadOBJWithMTL(const std::string& obj_path) {
         mesh->TRIANGLE_COUNT = static_cast<unsigned int>(indices.size() / 3);
         mesh->INDEX_COUNT = static_cast<unsigned int>(indices.size());
         mesh->material = materials.at(mat_name);
-        mesh->texture_id = materials.at(mat_name).texture_id;
 
         glGenVertexArrays(1, &mesh->VAO);
         glGenBuffers(1, &mesh->VBO);
@@ -1931,7 +1884,7 @@ std::vector<Mesh*> loadOBJWithMTL(const std::string& obj_path) {
 
         glBindVertexArray(0);
 
-        meshes.push_back(mesh);
+        meshes.emplace_back(mesh);
     }
     
     return meshes;
@@ -1985,27 +1938,146 @@ void parse_texture_map_line(std::stringstream& ss, std::string& texture_filename
     }
 }
 
+unsigned char* load_grayscale_data(const std::string& path, int& width, int& height) {
+    int channels; // Will be the actual channels in the file
+    // Force the output to be 1 channel (GL_RED)
+    unsigned char* data = stbi_load(path.c_str(), &width, &height, &channels, 1);
+    if (!data && !path.empty()) {
+        std::cerr << "Warning: Failed to load single-channel map: " << path << std::endl;
+    }
+    return data;
+}
+
+GLuint packAndLoadORMMap(const std::string& current_material_name, const std::string& ao_path, const std::string& roughness_path, const std::string& metallic_path, const std::string& height_path) {
+    int w_ao, h_ao;
+    int w_r, h_r;
+    int w_m, h_m;
+    int w_h, h_h;
+    
+    // Load data for all three maps
+    unsigned char* ao_data = load_grayscale_data(ao_path, w_ao, h_ao);
+    unsigned char* roughness_data = load_grayscale_data(roughness_path, w_r, h_r);
+    unsigned char* metallic_data = load_grayscale_data(metallic_path, w_m, h_m);
+    unsigned char* height_data = load_grayscale_data(height_path, w_h, h_h);
+    
+    // Must have at least one map to proceed
+    if (!ao_data && !roughness_data && !metallic_data && !height_data) {
+        return 0;
+    }
+
+    int width = 0, height = 0;
+    if (ao_data) { width = w_ao; height = h_ao; }
+    else if (roughness_data) { width = w_r; height = h_r; }
+    else if (metallic_data) { width = w_m; height = h_m; }
+    else if (height_data) { width = w_h; height = h_h; }
+    
+    if (width == 0 || height == 0) return 0;
+
+    // Create packed texture buffer (4 channels: R, G, B, A)
+    size_t data_size = (size_t)width * height * 4;
+    unsigned char* packed_data = new unsigned char[data_size];
+
+    // Create a fallback 1-channel buffer (all white, value 255) for missing maps
+    // AO = 1.0, Roughness = 1.0, Metallic = 0.0
+    unsigned char* default_channel_data = new unsigned char[width * height];
+    
+    // Use loaded data or default to white/black
+    unsigned char* final_ao = ao_data ? ao_data : default_channel_data;
+    unsigned char* final_roughness = roughness_data ? roughness_data : default_channel_data;
+    
+    // Metallic is typically 0.0 (black) for the default dielectric base,
+    // so we must handle its fallback specially if you want a non-metal look
+    unsigned char* final_metallic = metallic_data ? metallic_data : default_channel_data;
+    if (!metallic_data) memset(final_metallic, 0, width * height); // Set metallic fallback to 0 (black)
+    
+    // Height map fallback
+    unsigned char* final_height = height_data ? height_data : default_channel_data;
+    if (!height_data) memset(final_height, 128, width * height);
+
+    for (int i = 0; i < width * height; ++i) {
+        // R channel gets AO (Occlusion)
+        packed_data[i * 4 + 0] = final_ao[i];
+        // G channel gets Roughness
+        packed_data[i * 4 + 1] = final_roughness[i];
+        // B channel gets Metallic
+        packed_data[i * 4 + 2] = final_metallic[i];
+        // A channel gets Height
+        packed_data[i * 4 + 3] = final_height[i];
+    }
+    
+    GLuint orm_texture_id;
+    glGenTextures(1, &orm_texture_id);
+    glBindTexture(GL_TEXTURE_2D, orm_texture_id);
+    
+    // Standard texture parameters (reusing from your loadTexture)
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, packed_data);
+    glGenerateMipmap(GL_TEXTURE_2D);
+    
+    glBindTexture(GL_TEXTURE_2D, 0);
+
+    if (ao_data) stbi_image_free(ao_data);
+    if (roughness_data) stbi_image_free(roughness_data);
+    if (metallic_data) stbi_image_free(metallic_data);
+    if (height_data) stbi_image_free(height_data);
+    delete[] packed_data;
+    delete[] default_channel_data;
+    
+    printf("Successfully created and loaded packed ORM (RGBA) map for material: %s\n", current_material_name.c_str());
+    return orm_texture_id;
+}
+
 void loadMTL(const std::string& mtl_path, std::unordered_map<std::string, Material>& materials) {
     std::ifstream file(mtl_path);
     if (!file.is_open()) {
         std::cerr << "Warning: Cannot open MTL file " << mtl_path << std::endl;
         return;
     }
-
+    
     std::string current_material_name;
     std::string line;
+    
+    // Temporary path storage for packing
+    std::string current_roughness_path;
+    std::string current_metallic_path;
+    std::string current_ao_path;
+    std::string current_height_path;
+    
+    // Helper to get full path
+    auto get_full_path = [&](const std::string& filename) -> std::string {
+        std::string mtl_dir = mtl_path.substr(0, mtl_path.find_last_of('/'));
+        return mtl_dir + "/" + filename;
+    };
     
     while (std::getline(file, line)) {
         std::stringstream ss(line);
         std::string token;
         ss >> token;
-
+        
         if (token == "newmtl") {
+            if (!current_material_name.empty() && materials.count(current_material_name)) {
+                // Only pack if at least one map path was found for the previous material
+                if (!current_roughness_path.empty() || !current_metallic_path.empty() || !current_ao_path.empty() || !current_height_path.empty()) {
+                    materials[current_material_name].orm_map = packAndLoadORMMap(current_material_name, current_ao_path, current_roughness_path, current_metallic_path, current_height_path);
+                }
+            }
+            
+            // Start new material
             ss >> current_material_name;
             materials[current_material_name] = createDefaultMaterial();
             materials[current_material_name].name = current_material_name;
             
-        // PBR scalar maps
+            // Reset temporary paths for the new material
+            current_roughness_path.clear();
+            current_metallic_path.clear();
+            current_ao_path.clear();
+            current_height_path.clear();
+            
+            // PBR scalar maps
         } else if (token == "Pr" && materials.count(current_material_name)) {
             // Roughness value (0.0 to 1.0)
             ss >> materials[current_material_name].roughness;
@@ -2017,8 +2089,8 @@ void loadMTL(const std::string& mtl_path, std::unordered_map<std::string, Materi
         } else if (token == "Ke" && materials.count(current_material_name)) {
             // Emissive color
             ss >> materials[current_material_name].emissive.x
-               >> materials[current_material_name].emissive.y
-               >> materials[current_material_name].emissive.z;
+            >> materials[current_material_name].emissive.y
+            >> materials[current_material_name].emissive.z;
             
         // Legacy texture maps
         } else if (token == "map_Kd" && materials.count(current_material_name)) {
@@ -2034,7 +2106,7 @@ void loadMTL(const std::string& mtl_path, std::unordered_map<std::string, Materi
             
             if (tex_id == 0) {
                 std::cerr << "Warning: Failed to load texture " << full_texture_path
-                         << " for material " << current_material_name << std::endl;
+                << " for material " << current_material_name << std::endl;
             }
             
         // PBR texture maps
@@ -2049,30 +2121,35 @@ void loadMTL(const std::string& mtl_path, std::unordered_map<std::string, Materi
             materials[current_material_name].albedo_map = loadTexture(full_texture_path);
             printf("Loaded albedo map for '%s': %s\n", current_material_name.c_str(), texture_filename.c_str());
             
-        } else if ((token == "map_Pr" || token == "map_roughness")
-                   && materials.count(current_material_name)) {
+        } else if ((token == "map_Pr" || token == "map_roughness") && materials.count(current_material_name)) {
             // Roughness map
             std::string texture_filename;
             parse_texture_map_line(ss, texture_filename);
-            std::string mtl_dir = mtl_path.substr(0, mtl_path.find_last_of('/'));
-            std::string full_texture_path = mtl_dir + "/" + texture_filename;
+            current_roughness_path = get_full_path(texture_filename);
+            printf("Found roughness map path for '%s': %s\n", current_material_name.c_str(), current_roughness_path.c_str());
             
-            materials[current_material_name].roughness_map = loadTexture(full_texture_path);
-            printf("Loaded roughness map for '%s': %s\n", current_material_name.c_str(), texture_filename.c_str());
-            
-        } else if ((token == "map_Pm" || token == "map_metallic")
-                   && materials.count(current_material_name)) {
+        } else if ((token == "map_Pm" || token == "map_metallic") && materials.count(current_material_name)) {
             // Metallic map
             std::string texture_filename;
             parse_texture_map_line(ss, texture_filename);
-            std::string mtl_dir = mtl_path.substr(0, mtl_path.find_last_of('/'));
-            std::string full_texture_path = mtl_dir + "/" + texture_filename;
+            current_metallic_path = get_full_path(texture_filename);
+            printf("Found metallic map path for '%s': %s\n", current_material_name.c_str(), current_metallic_path.c_str());
             
-            materials[current_material_name].metallic_map = loadTexture(full_texture_path);
-            printf("Loaded metallic map for '%s': %s\n", current_material_name.c_str(), texture_filename.c_str());
+        } else if (token == "map_ao" && materials.count(current_material_name)) {
+            // Ambient occlusion map
+            std::string texture_filename;
+            parse_texture_map_line(ss, texture_filename);
+            current_ao_path = get_full_path(texture_filename);
+            printf("Found AO map path for '%s': %s\n", current_material_name.c_str(), current_ao_path.c_str());
             
-        } else if ((token == "norm" || token == "map_Bump" || token == "bump")
-                   && materials.count(current_material_name)) {
+        } else if ((token == "disp" || token == "map_disp") && materials.count(current_material_name)) {
+            // Height map
+            std::string texture_filename;
+            parse_texture_map_line(ss, texture_filename);
+            current_height_path = get_full_path(texture_filename);
+            printf("Found height map path for '%s': %s\n", current_material_name.c_str(), current_height_path.c_str());
+            
+        } else if ((token == "norm" || token == "map_Bump" || token == "bump") && materials.count(current_material_name)) {
             // Normal map
             std::string texture_filename;
             parse_texture_map_line(ss, texture_filename);
@@ -2081,16 +2158,6 @@ void loadMTL(const std::string& mtl_path, std::unordered_map<std::string, Materi
             
             materials[current_material_name].normal_map = loadTexture(full_texture_path);
             printf("Loaded normal map for '%s': %s\n", current_material_name.c_str(), texture_filename.c_str());
-            
-        } else if (token == "map_ao" && materials.count(current_material_name)) {
-            // Ambient occlusion map
-            std::string texture_filename;
-            parse_texture_map_line(ss, texture_filename);
-            std::string mtl_dir = mtl_path.substr(0, mtl_path.find_last_of('/'));
-            std::string full_texture_path = mtl_dir + "/" + texture_filename;
-            
-            materials[current_material_name].ao_map = loadTexture(full_texture_path);
-            printf("Loaded AO map for '%s': %s\n", current_material_name.c_str(), texture_filename.c_str());
             
         } else if ((token == "map_Ke" || token == "map_emissive")
                    && materials.count(current_material_name)) {
@@ -2114,9 +2181,15 @@ void loadMTL(const std::string& mtl_path, std::unordered_map<std::string, Materi
             printf("Loaded metallic-roughness map for '%s': %s\n", current_material_name.c_str(), texture_filename.c_str());
         }
     }
+    
+    if (!current_material_name.empty() && materials.count(current_material_name)) {
+        if (!current_roughness_path.empty() || !current_metallic_path.empty() || !current_ao_path.empty() || !current_height_path.empty()) {
+            materials[current_material_name].orm_map = packAndLoadORMMap(current_material_name, current_ao_path, current_roughness_path, current_metallic_path, current_height_path);
+        }
+    }
 }
 
-std::vector<Mesh*> loadOBJMesh(const std::string& obj_path) {
+std::vector<std::unique_ptr<Mesh>> loadOBJMesh(const std::string& obj_path) {
     const std::string& full_obj_path = buildAssetPath("OBJ_Models/" + obj_path);
     if (!std::filesystem::exists(full_obj_path)) {
         std::cerr << "ERROR::OBJ_LOAD::File does not exist: " << full_obj_path << std::endl;
@@ -2128,7 +2201,7 @@ std::vector<Mesh*> loadOBJMesh(const std::string& obj_path) {
         return {};
     }
     
-    std::vector<Mesh*> meshes = loadOBJWithMTL(full_obj_path);
+    std::vector<std::unique_ptr<Mesh>> meshes = loadOBJWithMTL(full_obj_path);
 
     if (meshes.empty()) {
         std::cerr << "Failed to load OBJ file: " << full_obj_path << std::endl;
@@ -2141,11 +2214,11 @@ std::vector<Mesh*> loadOBJMesh(const std::string& obj_path) {
     return meshes;
 }
 
+// ============================================================================
+// INITIALIZER
+// ============================================================================
+
 int main() {
-    
-    // ============================================================================
-    // INITIALIZER
-    // ============================================================================
     
     printf("Starting OpenGL 3D Engine...\n");
     
@@ -2172,12 +2245,23 @@ int main() {
     }
     glfwMakeContextCurrent(window);
     
+    // Turn V-Sync off
+    glfwSwapInterval(0);
+    
     if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress)) {
         printf("Failed to initialize GLAD\n");
         return -1;
     }
     
     printf("OpenGL Version: %s\n", glGetString(GL_VERSION));
+    
+    // Set up ImGui
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
+    ImGuiIO& io = ImGui::GetIO(); (void)io;
+    ImGui::StyleColorsDark();
+    ImGui_ImplGlfw_InitForOpenGL(window, true);
+    ImGui_ImplOpenGL3_Init("#version 330");
     
     // Set callbacks
     glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
@@ -2219,6 +2303,11 @@ int main() {
     
     // LOAD SKYBOXES //
     
+    // Initialise skybox
+    skyboxID = 0;
+    Skybox skybox;
+    skybox.initShader();
+    
     // Cloud skybox
     std::string cloud_skybox_paths[6] = {
         buildAssetPath("Skyboxes/Cloud_skybox/cloud_skybox_right.png"),   // GL_TEXTURE_CUBE_MAP_POSITIVE_X
@@ -2238,21 +2327,20 @@ int main() {
         cloud_skybox_paths[5].c_str()
     };
     
-    Skybox skybox;
-    skybox.init(cloud_skybox);
+    skybox.bindSkybox(cloud_skybox);
     
     // LOAD OBJ MESHES //
     
     // Note that when importing new assets you only need to add your files to the main assets folders
     // You can find the main asset folders at "OpenGL 3D Engine/OpenGL 3D Engine/OBJ_Models" or "OpenGL 3D Engine/OpenGL 3D Engine/Skyboxes"
     
-    std::vector<Mesh*> level_mesh = loadOBJMesh("Level/level.obj");
-    std::vector<Mesh*> tree_mesh = loadOBJMesh("Realistic_tree/tree.obj");
-    std::vector<Mesh*> instructions_mesh = loadOBJMesh("Instructions_Panel/quad.obj");
-    std::vector<Mesh*> cube_mesh = loadOBJMesh("Cube/cube.obj");
-    std::vector<Mesh*> sphere_mesh = loadOBJMesh("Sphere/sphere.obj");
-    std::vector<Mesh*> streetlight_mesh = loadOBJMesh("Streetlight/streetlight.obj");
-    std::vector<Mesh*> cone_mesh = loadOBJMesh("Cone/cone.obj");
+    auto level_mesh = loadOBJMesh("Level/level.obj");
+    auto tree_mesh = loadOBJMesh("Realistic_tree/tree.obj");
+    auto instructions_mesh = loadOBJMesh("Instructions_Panel/quad.obj");
+    auto cube_mesh = loadOBJMesh("Cube/cube.obj");
+    auto sphere_mesh = loadOBJMesh("Sphere/sphere.obj");
+    auto streetlight_mesh = loadOBJMesh("Streetlight/streetlight.obj");
+    auto cone_mesh = loadOBJMesh("Cone/cone.obj");
     
     // ============================================================================
     // CREATE SCENE OBJECTS
@@ -2260,20 +2348,21 @@ int main() {
     
     // CREATE LIGHT SOURCES //
     
-    createPointLight("light_1", glm::vec3(0, 10, 0), glm::vec3(1, 1, 1), 500.0f,
-                     sphere_mesh, glm::vec3(0.25, 0.25, 0.25), std::vector<int>{CULL_BACK});
-    createSpotlight("light_0", glm::vec3(-7.05, 3.5, 0.05), glm::vec3(1, 1, 1), 1000.0f,
+    createDirLight("sun", glm::vec3(0, 1, 0), glm::vec3(1, 1, 1), 2500);
+    createPointLight("streetlamp", glm::vec3(-7.05, 3.5, 0.05), glm::vec3(1, 1, 1), 500,
+                    {}, glm::vec3(0.1, 0.1, 0.1), std::vector<int>{CULL_BACK});
+    createSpotlight("torchlight", glm::vec3(0, 0, 0), glm::vec3(1, 1, 1), 250,
                     glm::vec3(1, 0, 0), 12.5f, 17.5f, glm::vec3(0, 0, 0),
                     {}, glm::vec3(0.1, 0.1, 0.1), std::vector<int>{CULL_BACK});
     
     // CREATE ENTITIES //
-        
-    createEntity("level", level_mesh, glm::vec3(0, 0, 0), glm::vec3(0, 0, 0), glm::vec3(10, 10, 10), std::vector<int> {CULL_NONE});
-    createEntity("tree", tree_mesh, glm::vec3(0, 0, 0), glm::vec3(0, 0, 0), glm::vec3(1, 1, 1), std::vector<int>{CULL_NONE, CULL_BACK});
-    createEntity("instructions", instructions_mesh, glm::vec3(0, 2, 4), glm::vec3(0, 0, 0), glm::vec3(1, 1, 1), std::vector<int> {CULL_NONE});
-    createEntity("cube", cube_mesh, glm::vec3(5, 3, 0), glm::vec3(0, 0, 0), glm::vec3(1, 1, 1), std::vector<int> {CULL_BACK});
-    createEntity("sphere", sphere_mesh, glm::vec3(0, 2, -5), glm::vec3(0, 0, 0), glm::vec3(1, 1, 1), std::vector<int> {CULL_BACK});
-    createEntity("streetlight", streetlight_mesh, glm::vec3(-7, 0.05, 0), glm::vec3(1, 1, 1), glm::vec3(1, 1, 1), std::vector<int>{CULL_BACK});
+    
+    createEntity("level", std::move(level_mesh), glm::vec3(0, 0, 0), glm::vec3(0, 0, 0), glm::vec3(10, 10, 10), std::vector<int> {CULL_NONE});
+    createEntity("tree", std::move(tree_mesh), glm::vec3(0, 0, 0), glm::vec3(0, 0, 0), glm::vec3(1, 1, 1), std::vector<int>{CULL_NONE, CULL_BACK});
+    createEntity("instructions", std::move(instructions_mesh), glm::vec3(0, 2, 4), glm::vec3(0, 0, 0), glm::vec3(1, 1, 1), std::vector<int> {CULL_NONE});
+    createEntity("cube", std::move(cube_mesh), glm::vec3(5, 3, 0), glm::vec3(0, 0, 0), glm::vec3(1, 1, 1), std::vector<int> {CULL_BACK});
+    createEntity("sphere", std::move(sphere_mesh), glm::vec3(0, 2, -5), glm::vec3(0, 0, 0), glm::vec3(1, 1, 1), std::vector<int> {CULL_BACK});
+    createEntity("streetlight", std::move(streetlight_mesh), glm::vec3(-7, 0.05, 0), glm::vec3(1, 1, 1), glm::vec3(1, 1, 1), std::vector<int>{CULL_BACK});
     
     printf("Total triangles: %d\n", total_triangles);
     printf("Active entities: %zu\n", entity_manager.size());
@@ -2339,16 +2428,15 @@ int main() {
             
             // UPDATE LIGHTS
             
-            lights[1].position = glm::vec3(global_camera.position);
-            lights[1].direction = glm::vec3(global_camera.front);
+            lights[2].position = glm::vec3(global_camera.position);
+            lights[2].direction = glm::vec3(global_camera.front);
             
             // UPDATE OBJECTS
             
-            entity_manager.updateEntity("cube", VEC3_NO_CHANGE, glm::vec3(update_count, update_count * 0.5f, SCALAR_NO_CHANGE), VEC3_NO_CHANGE);
+            // entity_manager.updateEntity("cube", VEC3_NO_CHANGE, glm::vec3(update_count, update_count * 0.5f, SCALAR_NO_CHANGE), VEC3_NO_CHANGE);
             entity_manager.updateEntity("sphere", glm::vec3(SCALAR_NO_CHANGE, 2.5 + sinf(update_count * 0.01f), SCALAR_NO_CHANGE), glm::vec3(update_count, 0, 0), VEC3_NO_CHANGE);
             
             update_count += speed_multiplier;
-            
         }
         
         // Clear background
@@ -2364,7 +2452,7 @@ int main() {
             shadowLightIndex = static_cast<int>(i);
             break; // Only render shadows for the first shadow-casting light
         }
-        
+                
         // Render skybox before other objects
         skybox.render(&global_camera);
         
@@ -2378,7 +2466,8 @@ int main() {
                     if (entity->name == light.entity_name) {
                         is_light = true;
                         // Render as unlit emissive object
-                        for (Mesh* mesh : entity->meshes) {
+                        for (const auto& meshPtr : entity->meshes) {
+                            Mesh* mesh = meshPtr.get();
                             if (mesh && mesh->isValid()) {
                                 renderer->drawUnlitMesh(entity, mesh, light.color, light.intensity);
                             }
@@ -2389,27 +2478,79 @@ int main() {
                 
                 // Render normally if not a light
                 if (!is_light) {
-                    renderer->drawEntity(entity, global_camera, lights, shadowLightIndex);
+                    renderer->drawEntity(entity, global_camera, shadowLightIndex);
                 }
             }
         }
         
         glfwPollEvents();
+        
+        // ============================================================================
+        // UI & WINDOW CONTROL
+        // ============================================================================
+        
+        // Render and update ImGui GUI
+        ImGui_ImplOpenGL3_NewFrame();
+        ImGui_ImplGlfw_NewFrame();
+        ImGui::NewFrame();
+        
+        ImGui::Begin("Engine");
+        ImGui::Text("FPS: %.1f", fps);
+        ImGui::Text("Triangles: %u", total_triangles);
+        if (ImGui::Button("V-Sync ON"))  glfwSwapInterval(1);
+        if (ImGui::Button("V-Sync OFF")) glfwSwapInterval(0);
+        ImGui::End();
+        
+        ImGui::Render();
+        ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+        
         glfwSwapBuffers(window);
         
-        // Handle pause/unpause
+        // Handle mouse cursor pointerlock/normal modes
         if (glfwGetInputMode(window, GLFW_CURSOR) == GLFW_CURSOR_NORMAL) {
             if (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT)) {
-                paused = false;
-                firstMouse = true;
-                glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED); // Enable pointerlock
+                if (!ImGui::GetIO().WantCaptureMouse) {
+                    firstMouse = true;
+                    glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED); // Enable pointerlock
+                }
             }
         } else {
             if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS) {
-                paused = true;
                 glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL); // Disable pointerlock
             }
         }
+        
+        // Handle fullscreen entry/exit
+        static bool f_pressed  = false;
+        if (glfwGetKey(window, GLFW_KEY_F) == GLFW_PRESS && !f_pressed) {
+            f_pressed = true;
+            
+            GLFWmonitor *monitor = glfwGetPrimaryMonitor();
+            const GLFWvidmode *vm = glfwGetVideoMode(monitor);
+            if (!fullscreen) {
+                // Enter fullscreen
+                WINDOW_WIDTH = vm->width;
+                WINDOW_HEIGHT = vm->height;
+                glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL); // free cursor
+                glfwSetWindowMonitor(window, monitor, 0, 0, vm->width, vm->height, vm->refreshRate);
+                fullscreen = true;
+            } else {
+                // Leave fullscreen
+                WINDOW_WIDTH = 800;
+                WINDOW_HEIGHT = 600;
+                glfwSetWindowMonitor(window, nullptr, 0, 0, 800, 600, 0);
+                fullscreen = false;
+                
+                // Center the window
+                int w, h;
+                glfwGetWindowSize(window, &w, &h);
+                GLFWmonitor *m = glfwGetPrimaryMonitor();
+                int mx, my, mw, mh;
+                glfwGetMonitorWorkarea(m, &mx, &my, &mw, &mh);
+                glfwSetWindowPos(window, mx + (mw - w) / 2, my + (mh - h) / 2);
+            }
+        }
+        if (glfwGetKey(window, GLFW_KEY_F) == GLFW_RELEASE) f_pressed = false;
     }
     
     // ============================================================================
@@ -2417,7 +2558,6 @@ int main() {
     // ============================================================================
     
     printf("Cleaning up...\n");
-    cleanup_all_meshes();
     skybox.cleanup();
     
     if (default_texture_id != 0) {
@@ -2425,6 +2565,11 @@ int main() {
     }
     
     cleanupShadowMap();
+    
+    // Cleanup ImGui
+    ImGui_ImplOpenGL3_Shutdown();
+    ImGui_ImplGlfw_Shutdown();
+    ImGui::DestroyContext();
     
     glfwDestroyWindow(window);
     glfwTerminate();

@@ -1,5 +1,5 @@
 # Ignore build directories and their contents
-build/
+build*/
 
 # Common OS/IDE files to ignore
 .DS_Store

@@ -1,7 +1,7 @@
 # Blender 4.5.3 LTS MTL File: 'None'
 # www.blender.org
 
-newmtl Material
+newmtl Grass
 Ns 250.000000
 Ka 1.000000 1.000000 1.000000
 Kd 0.800000 0.800000 0.800000
@@ -10,7 +10,8 @@ Ke 0.000000 0.000000 0.000000
 Ni 1.450000
 d 1.000000
 illum 2
-map_Pr realistic_grass_roughness.jpg
-map_height realistic_grass_height.jpg
-map_ao realistic_grass_normal.jpg
-map_Kd realistic_grass_diffuse.jpg
+# map_roughness checkered_grass_roughness.png
+# map_disp checkered_grass_height.png
+# map_Bump checkered_grass_normal.png
+# map_ao checkered_grass_ao.png
+map_Kd checkered_grass_diffuse.png
