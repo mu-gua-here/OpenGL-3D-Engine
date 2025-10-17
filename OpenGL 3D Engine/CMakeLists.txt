@@ -22,17 +22,17 @@ add_definitions(-DGLFW_INCLUDE_NONE)
 
 # Include dirs
 include_directories(
-    External/glad/include
-    External/glfw/include
-    External/glm
-    External/stb
+    external/glad/include
+    external/glfw/include
+    external/glm
+    external/stb
     imgui # imgui headers are here
 )
 
 # Executable
 add_executable(${PROJECT_NAME}
     main.cpp
-    External/glad/src/glad.c
+    external/glad/src/glad.c
 
     # ImGui core
     imgui/imgui.cpp
@@ -48,7 +48,7 @@ add_executable(${PROJECT_NAME}
 
 # Link
 target_link_libraries(${PROJECT_NAME}
-    "${CMAKE_SOURCE_DIR}/External/glfw/libglfw3.a"
+    "${CMAKE_SOURCE_DIR}/external/glfw/libglfw3.a"
     "-framework Cocoa"
     "-framework IOKit"
     "-framework CoreVideo"

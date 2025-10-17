@@ -7,7 +7,13 @@
 
 /*
  
- NOTES
+ CC ATTRIBUTION
+ Realistic palm tree: "Realistic Palm Tree 4 Free" (https://skfb.ly/pvuYZ) by Next Spring is licensed under Creative Commons Attribution (http://creativecommons.org/licenses/by/4.0/).
+ Checkered grass texture designed by Freepik
+ Road tracks: "Road Modular" (https://skfb.ly/pxYZw) by golukumar is licensed under Creative Commons Attribution (http://creativecommons.org/licenses/by/4.0/).
+ 
+ SPECIAL NOTES
+ 1. Tree model is personal use license only - non-commerical
  
  IMPLEMENTATION LIST
  1. Add collision detection
@@ -19,11 +25,12 @@
     c. Frustum culling
     d. LOD
  
- BUGS / IMPROVEMENTS LIST
- 1. Entity deletion optimization (memory leaks are present in current code)
- 2. Fix goofy-ahh AO and roughness broken texture
- 3. Shadow mapping not working for directional lights
- 4. Fix broken POM :cry:
+ BUGS LIST
+ 1. Fix broken POM :cry:
+ 2. If height map present everything else becomes overwritten
+ 3. Fix self-shadowing artifacts in PBR
+ 4. Fix OBJ loader for loading texture coordinates
+ 5. Fix bug for ImGui window mouse interaction
  
  */
 
@@ -32,7 +39,6 @@
 #include "glad/glad.h"
 
 // ImGui
-#include "imgui.h"
 #include "imgui_impl_glfw.h"
 #include "imgui_impl_opengl3.h"
 
@@ -50,6 +56,7 @@
 #include <memory>
 #define _USE_MATH_DEFINES
 #include <cmath>
+#include <cstdio>
 
 // Filesystem access
 #include <filesystem>
@@ -58,10 +65,11 @@
 #endif
 
 // GLM library
+#define GLM_ENABLE_EXPERIMENTAL
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
-#define GLM_ENABLE_EXPERIMENTAL
+#include <glm/gtx/hash.hpp>
 #include <glm/gtx/string_cast.hpp>
 
 // Function prototypes
@@ -82,10 +90,11 @@ double fps;
 bool paused = false;
 float update_count = 0;
 float frame_time = 1.0f;
-float speed_multiplier = 1.0f;
+float tick_speed = 1.0f;
 glm::mat4 view;
 glm::mat4 projection;
 bool fullscreen = false;
+float cam_speed_multiplier = 0.05f;
 
 // Scene stats
 unsigned int total_triangles = 0;
@@ -94,8 +103,8 @@ unsigned int entity_count = 0;
 // Shadow mapping
 GLuint shadowMapFBO = 0;
 GLuint shadowMapTexture = 0;
-const unsigned int SHADOW_WIDTH = 4096;
-const unsigned int SHADOW_HEIGHT = 4096;
+const unsigned int SHADOW_WIDTH = 8192;
+const unsigned int SHADOW_HEIGHT = 8192;
 glm::mat4 lightSpaceMatrix;
 
 // Game settings
@@ -118,7 +127,7 @@ void updateFPS(GLFWwindow* window) {
     double currentTime = glfwGetTime();
     frame_time = currentTime - lastTime;
     lastTime = currentTime;
-    speed_multiplier = frame_time / 0.0083f;
+    tick_speed = frame_time / 0.0083f;
     
     frameCount++;
     fpsTimer += frame_time;
@@ -208,7 +217,8 @@ public:
     // Texture IDs - 0 means "not present"
     GLuint albedo_map = 0;      // Base color texture
     GLuint normal_map = 0;      // Normal/bump map
-    GLuint orm_map = 0;         // AO, roughnesss and metallic maps combined
+    GLuint orm_map = 0;         // AO, roughnesss, metallic and height maps
+    GLuint height_map = 0;      // Optimisation for height map
     GLuint emissive_map = 0;    // Self-illumination
     
     // For metallic-roughness combined textures (common in glTF)
@@ -218,7 +228,7 @@ public:
     GLuint texture_id = 0;
     Color diffuse_color;
     
-    float height_scale = 0.0f;
+    float height_scale = 0.01f;
     
     Material() = default;
     Material(const std::string& name) : name(name) {}
@@ -229,7 +239,7 @@ public:
     bool hasORMMap() const { return orm_map != 0; }
     bool hasEmissiveMap() const { return emissive_map != 0; }
     bool hasMetallicRoughnessMap() const { return metallic_roughness_map != 0; }
-    bool hasHeightMap() const { return orm_map != 0; }
+    bool hasHeightMap() const { return height_map != 0; }
 };
 
 Material createDefaultMaterial() {
@@ -371,7 +381,7 @@ void initShadowMap() {
     glReadBuffer(GL_NONE);
     
     if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
-        printf("Error: Shadow map framebuffer is not complete!\n");
+        printf("Error: Shadow map framebuffer is not complete\n");
     }
     
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
@@ -575,7 +585,7 @@ Camera create_camera(float aspect) {
     cam.fov = glm::radians(45.0f);
     cam.aspect_ratio = aspect;
     cam.near_plane = 0.1f;
-    cam.far_plane = 100.0f;
+    cam.far_plane = 200.0f;
     return cam;
 }
 
@@ -626,27 +636,13 @@ typedef struct {
 
 std::vector<Light> lights;
 
-// Helper function for directional lights
-glm::mat4 computeDirLightSpaceMatrix (const glm::vec3& direction, const Camera& cam, float halfSize, float zNear, float zFar) {
-    glm::vec3 L = glm::normalize(direction); // light shines in –L
-    glm::vec3 up = std::abs(L.y) > 0.999f ? glm::vec3(0,0,1)
-                                          : glm::vec3(0,1,0);
-    glm::mat4 V = glm::lookAt(cam.position - L * zFar * 0.5f,
-                              cam.position, up);
-    glm::mat4 P = glm::ortho(-halfSize, halfSize,
-                             -halfSize, halfSize,
-                             zNear, zFar);
-    return P * V;
-}
-
 void createDirLight(std::string name, glm::vec3 direction, glm::vec3 color, int intensity) {
     Light light;
-    light.position = direction * 1000.0f;
     light.color = color;
-    light.intensity = intensity * 1000;
+    light.intensity = intensity;
     
+    light.direction = glm::normalize(direction);
     // Set spotlight-only settings to invalid
-    light.direction = glm::vec3(0.0f, -1.0f, 0.0f);
     light.inner_cutoff_cos = -1.0f;
     light.outer_cutoff_cos = -1.0f;
     light.type = DIR_LIGHT;
@@ -918,7 +914,7 @@ uniform bool hasHeightMap;
 #define MAX_LIGHTS 8
 uniform int lightCount;
 uniform vec3 viewPos;
-uniform int  shadowLightIndex;
+uniform int shadowLightIndex;
 
 uniform vec3 lightPositions[MAX_LIGHTS];
 uniform vec3 lightColors[MAX_LIGHTS];
@@ -934,27 +930,28 @@ const float PI = 3.14159265359;
 vec2 parallaxMapping(vec2 uv, vec3 Vts) {
     const float minLayers = 8.0;
     const float maxLayers = 32.0;
-    float numLayers = mix(maxLayers, minLayers, abs(Vts.z));   // more layers when grazing
+    float numLayers = mix(maxLayers, minLayers, abs(Vts.z));
     float layerDepth = 1.0 / numLayers;
-    vec2 deltaUV = Vts.xy * heightScale / numLayers;
+
+    // walk AGAINST the view direction
+    vec2 deltaUV = -Vts.xy * heightScale / numLayers;
 
     float currDepth = 0.0;
     vec2  currUV = uv;
     float height = texture(ormMap, currUV).a;
 
-    // Ray-march until we go *below* the surface
     for (float i = 0.0; i < numLayers; ++i) {
+        if (currDepth >= height) break;
         currUV -= deltaUV;
         height = texture(ormMap, currUV).a;
         currDepth += layerDepth;
-        if (currDepth >= height) break;
     }
 
-    // Refine with a second linear step
+    // Linear refinement
     vec2 prevUV = currUV + deltaUV;
     float prevH = texture(ormMap, prevUV).a;
     float nextH = height;
-    float w = (currDepth - currDepth + layerDepth - prevH) / (nextH - prevH + 1e-4);
+    float w = (currDepth - layerDepth - prevH) / (nextH - prevH + 1e-4);
     currUV = mix(prevUV, currUV, w);
 
     return currUV;
@@ -972,18 +969,19 @@ float calcShadow(vec4 fragLight, vec3 N, vec3 L) {
     if (proj.z > 1.0) return 0.0;
 
     // Apply bias to account for self-shadowing acne
-    float bias = max(0.2 * tan(acos(dot(N, L))), 0.02);
+    float bias = max(0.0005 * tan(acos(dot(N, L))), 0.0002);
     vec3 shadowPos = vec3(fragLight) + L * bias; // Push vertex along normal
     proj.z = (shadowPos.z / fragLight.w) * 0.5 + 0.5 - bias; // Apply to depth
 
     float shadow = 0.0;
     vec2 texel = 1.0 / textureSize(shadowMap, 0);
-    for (int x = -1; x <= 1; ++x) {
-        for (int y = -1; y <= 1; ++y) {
+    const int pcfSize = 2;
+    for (int x = -pcfSize; x <= pcfSize; ++x) {
+        for (int y = -pcfSize; y <= pcfSize; ++y) {
             shadow += texture(shadowMap, proj.xy + vec2(x,y) * texel).r < proj.z ? 1.0 : 0.0;
         }
     }
-    shadow /= 9.0;
+    shadow /= (pcfSize * 2 + 1) * (pcfSize * 2 + 1);
 
     // Soft border fade
     vec2 border = min(proj.xy, 1.0 - proj.xy);
@@ -1015,15 +1013,15 @@ float G_Smith(vec3 N, vec3 V, vec3 L, float rough) {
 void main() {
     // Tangent-space POM
     vec3 Vworld = normalize(viewPos - FragPos);
-    vec3 Vts = normalize(transpose(TBN) * Vworld); // View dir in tangent space
     vec2 uv;
-    if (!hasHeightMap) {
-        uv = TexCoord;
-    } else {
+    if (hasHeightMap) {
+        vec3 Vts = normalize(transpose(TBN) * Vworld); // View dir in tangent space
         uv = parallaxMapping(TexCoord, Vts);
+    } else {
+        uv = TexCoord;
     }
-
-    // Sample texture
+    
+    // Sample PBR maps
     vec4 albedoS = hasAlbedoMap ? texture(albedoMap, uv) : vec4(baseColor, 1.0);
     if (albedoS.a < 0.5) discard;
 
@@ -1050,14 +1048,23 @@ void main() {
 
     for (int i = 0; i < lightCount && i < MAX_LIGHTS; ++i) {
         // Calculate vector based on whether light is directional or not
-        vec3 L = (lightTypes[i] < 0.5) ? normalize(-lightPositions[i]) : normalize(lightPositions[i] - FragPos);
-        vec3 H = normalize(V + L);
-        float dist = length(lightPositions[i] - FragPos);
-        float att = 1.0 / (dist * dist);
+        vec3 L;
+        vec3 H;
+        float att;
+        if (lightTypes[i] == 0) {
+            L = -lightDirections[i];
+            H = normalize(V + L);
+            att = 1.0f;
+        } else {
+            L = normalize(lightPositions[i] - FragPos);
+            H = normalize(V + L);
+            float dist = length(lightPositions[i] - FragPos);
+            att = 1.0 / (dist * dist);
+        }
         vec3 radiance = lightColors[i] * lightIntensities[i] * att;
 
         // Spotlight attenuation
-        if (lightTypes[i] > 0.5) {
+        if (lightTypes[i] != 0) {
             float theta = dot(-L, lightDirections[i]);
             float eps = lightInnerCutoffs[i] - lightOuterCutoffs[i];
             float spot = clamp((theta - lightOuterCutoffs[i]) / eps, 0.0, 1.0);
@@ -1278,11 +1285,11 @@ public:
         skybox_shader->use();
         
         // Get view matrix and remove translation
-        glm::mat4 view = glm::mat4(glm::mat3(camera_get_view_matrix(camera)));
-        glm::mat4 projection = camera_get_projection(camera);
+        glm::mat4 skybox_view = glm::mat4(glm::mat3(camera_get_view_matrix(camera)));
+        glm::mat4 skybox_projection = camera_get_projection(camera);
         
-        skybox_shader->setMat4("view", view);
-        skybox_shader->setMat4("projection", projection);
+        skybox_shader->setMat4("view", skybox_view);
+        skybox_shader->setMat4("projection", skybox_projection);
         
         glBindVertexArray(VAO);
         glActiveTexture(GL_TEXTURE0);
@@ -1300,12 +1307,10 @@ public:
     void cleanup() {
         if (VAO != 0) glDeleteVertexArrays(1, &VAO);
         if (VBO != 0) glDeleteBuffers(1, &VBO);
-        for (size_t i = 0; i < cubemap_texture.size(); i++) {
-            if (cubemap_texture[i] != 0) {
-                glDeleteTextures(1, &cubemap_texture[i]);
-                cubemap_texture[i] = 0;
-            }
+        for (GLuint tex : cubemap_texture) {
+            if (tex != 0) glDeleteTextures(1, &tex);
         }
+        cubemap_texture.clear();
         VAO = VBO = 0;
     }
 };
@@ -1360,19 +1365,23 @@ public:
             
         } else if (light.type == POINT_LIGHT) {
             // Omni-directional point light
-            glm::vec3 lightTarget = glm::vec3(0.0f, 0.0f, 0.0f);
-            glm::vec3 finalDir = glm::normalize(lightTarget - light.position);
+            glm::vec3 finalDir = glm::normalize(light.position - glm::vec3(0));
 
             glm::vec3 up = glm::abs(finalDir.y) > 0.99f ? glm::vec3(0, 0, 1) : glm::vec3(0, 1, 0);
             
             lightProjection = glm::perspective(glm::radians(90.0f), 1.0f, 0.5f, 100.0f);
-            glm::mat4 lightView = glm::lookAt(light.position, lightTarget, up);
+            glm::mat4 lightView = glm::lookAt(light.position, glm::vec3(0), up);
             
             lightSpaceMatrix = lightProjection * lightView;
             
         } else if (light.type == DIR_LIGHT) {
             // Directional light
-            lightSpaceMatrix = computeDirLightSpaceMatrix(light.position, global_camera, 40.0f, 0.1f, 200.0f);
+            glm::vec3 finalDir = glm::normalize(light.direction); // light shines in –L
+            glm::vec3 up = std::abs(finalDir.y) > 0.999f ? glm::vec3(0, 0, 1) : glm::vec3(0, 1, 0);
+            glm::mat4 lightView = glm::lookAt(global_camera.position - finalDir * 300.0f * 0.5f, global_camera.position, up);
+            glm::mat4 lightProjection = glm::ortho(-75.0f, 75.0f, -75.0f, 75.0f, 0.1f, 300.0f);
+            
+            lightSpaceMatrix = lightProjection * lightView;
         }
         
         shadow_shader->use();
@@ -1439,11 +1448,6 @@ public:
         std::vector<float> types;
 
         for (const auto& light : lights) {
-            glm::mat4 rotationMatrix(1.0f);
-            rotationMatrix = glm::rotate(rotationMatrix, glm::radians(light.euler_rotation.y), glm::vec3(0.0f, 1.0f, 0.0f)); // Yaw
-            rotationMatrix = glm::rotate(rotationMatrix, glm::radians(light.euler_rotation.x), glm::vec3(1.0f, 0.0f, 0.0f)); // Pitch
-            rotationMatrix = glm::rotate(rotationMatrix, glm::radians(light.euler_rotation.z), glm::vec3(0.0f, 0.0f, 1.0f)); // Roll
-                        
             positions.push_back(light.position);
             colors.push_back(light.color);
             intensities.push_back(light.intensity);
@@ -1537,8 +1541,7 @@ public:
         
         // Albedo map
         glActiveTexture(GL_TEXTURE0 + texture_unit);
-        GLuint albedo_to_use = mesh->material.hasAlbedoMap() ?
-        mesh->material.albedo_map : default_texture_id;
+        GLuint albedo_to_use = mesh->material.hasAlbedoMap() ? mesh->material.albedo_map : default_texture_id;
         glBindTexture(GL_TEXTURE_2D, albedo_to_use);
         pbr_shader->setInt("albedoMap", texture_unit);
         pbr_shader->setInt("hasAlbedoMap", mesh->material.hasAlbedoMap());
@@ -1546,8 +1549,7 @@ public:
         
         // Normal map
         glActiveTexture(GL_TEXTURE0 + texture_unit);
-        GLuint normal_to_use = mesh->material.hasNormalMap() ?
-        mesh->material.normal_map : default_texture_id;
+        GLuint normal_to_use = mesh->material.hasNormalMap() ? mesh->material.normal_map : default_texture_id;
         glBindTexture(GL_TEXTURE_2D, normal_to_use);
         pbr_shader->setInt("normalMap", texture_unit);
         pbr_shader->setInt("hasNormalMap", mesh->material.hasNormalMap());
@@ -1555,19 +1557,18 @@ public:
         
         // ORM map
         glActiveTexture(GL_TEXTURE0 + texture_unit);
-        if (mesh->material.hasORMMap()) {
-            glBindTexture(GL_TEXTURE_2D, mesh->material.orm_map);
-        } else {
-            glBindTexture(GL_TEXTURE_2D, default_texture_id);
-        }
+        GLuint orm_to_use = mesh->material.hasORMMap() ? mesh->material.orm_map : default_texture_id;
+        glBindTexture(GL_TEXTURE_2D, orm_to_use);
         pbr_shader->setInt("ormMap", texture_unit);
+        pbr_shader->setInt("hasORMMap", mesh->material.hasORMMap());
+        // Height map
+        pbr_shader->setInt("hasHeightMap", mesh->material.hasHeightMap());
         pbr_shader->setFloat("heightScale", mesh->material.height_scale);
-        pbr_shader->setInt("hasHeightMap", mesh->material.hasORMMap());
+        texture_unit++;
         
         // Emissive map
         glActiveTexture(GL_TEXTURE0 + texture_unit);
-        GLuint emissive_to_use = mesh->material.hasEmissiveMap() ?
-        mesh->material.emissive_map : default_texture_id;
+        GLuint emissive_to_use = mesh->material.hasEmissiveMap() ? mesh->material.emissive_map : default_texture_id;
         glBindTexture(GL_TEXTURE_2D, emissive_to_use);
         pbr_shader->setInt("emissiveMap", texture_unit);
         pbr_shader->setInt("hasEmissiveMap", mesh->material.hasEmissiveMap());
@@ -1632,14 +1633,14 @@ void loadMTL(const std::string& mtl_path, std::unordered_map<std::string, Materi
 struct Vertex {
     glm::vec3 position;
     glm::vec4 color;
-    glm::vec2 texcoord;
+    glm::vec2 uv;
     glm::vec3 normal;
     glm::vec3 tangent;
     glm::vec3 bitangent;
 
     bool operator==(const Vertex& other) const {
         return position == other.position &&
-               texcoord == other.texcoord &&
+               uv == other.uv &&
                normal == other.normal &&
                color == other.color &&
                tangent == other.tangent &&
@@ -1649,17 +1650,11 @@ struct Vertex {
 
 namespace std {
     template<> struct hash<Vertex> {
-        size_t operator()(const Vertex& v) const {
-            return ((hash<float>()(v.position.x) ^ hash<float>()(v.position.y) << 1) >> 1)
-                 ^ (hash<float>()(v.position.z) << 1)
-                 ^ (hash<float>()(v.texcoord.x) << 2)
-                 ^ (hash<float>()(v.texcoord.y) << 3)
-                 ^ (hash<float>()(v.normal.x) << 4)
-                 ^ (hash<float>()(v.normal.y) << 5)
-                 ^ (hash<float>()(v.normal.z) << 6)
-                 ^ (hash<float>()(v.tangent.x) << 7)
-                 ^ (hash<float>()(v.tangent.y) << 8)
-                 ^ (hash<float>()(v.tangent.z) << 9);
+        size_t operator()(const Vertex& v) const noexcept {
+            size_t h1 = hash<glm::vec3>{}(v.position);
+            size_t h2 = hash<glm::vec2>{}(v.uv);
+            size_t h3 = hash<glm::vec3>{}(v.normal);
+            return h1 ^ (h2 << 1) ^ (h3 << 2); // Combine attributes
         }
     };
 }
@@ -1688,10 +1683,6 @@ void calculateTangentBitangent(
 
 std::vector<std::unique_ptr<Mesh>> loadOBJWithMTL(const std::string& obj_path) {
     std::ifstream file(obj_path);
-    if (!file.is_open()) {
-        std::cerr << "Error: Cannot open file " << obj_path << std::endl;
-        return {};
-    }
     
     std::unordered_map<std::string, Material> materials;
     std::unordered_map<std::string, std::vector<Vertex>> unique_vertices;
@@ -1803,7 +1794,7 @@ std::vector<std::unique_ptr<Mesh>> loadOBJWithMTL(const std::string& obj_path) {
                 if (fv.v_idx < 0 || fv.v_idx >= (int)temp_vertices.size()) continue;
                 
                 triangle_verts[j].position = temp_vertices[fv.v_idx];
-                triangle_verts[j].texcoord = (fv.vt_idx >= 0 && fv.vt_idx < (int)temp_texcoords.size())
+                triangle_verts[j].uv = (fv.vt_idx >= 0 && fv.vt_idx < (int)temp_texcoords.size())
                     ? temp_texcoords[fv.vt_idx] : glm::vec2(0.0f, 0.0f);
                 triangle_verts[j].normal = (fv.vn_idx >= 0 && fv.vn_idx < (int)temp_normals.size())
                     ? temp_normals[fv.vn_idx] : glm::vec3(0.0f, 1.0f, 0.0f);
@@ -1814,7 +1805,7 @@ std::vector<std::unique_ptr<Mesh>> loadOBJWithMTL(const std::string& obj_path) {
             glm::vec3 tangent, bitangent;
             calculateTangentBitangent(
                 triangle_verts[0].position, triangle_verts[1].position, triangle_verts[2].position,
-                triangle_verts[0].texcoord, triangle_verts[1].texcoord, triangle_verts[2].texcoord,
+                triangle_verts[0].uv, triangle_verts[1].uv, triangle_verts[2].uv,
                 tangent, bitangent
             );
             
@@ -1845,7 +1836,7 @@ std::vector<std::unique_ptr<Mesh>> loadOBJWithMTL(const std::string& obj_path) {
         const std::vector<Vertex>& vertices = pair.second;
         const std::vector<unsigned int>& indices = indices_by_material[mat_name];
 
-        Mesh* mesh = new Mesh();
+        auto mesh = std::make_unique<Mesh>();
         mesh->TRIANGLE_COUNT = static_cast<unsigned int>(indices.size() / 3);
         mesh->INDEX_COUNT = static_cast<unsigned int>(indices.size());
         mesh->material = materials.at(mat_name);
@@ -1870,7 +1861,7 @@ std::vector<std::unique_ptr<Mesh>> loadOBJWithMTL(const std::string& obj_path) {
         glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, stride, (void*)offsetof(Vertex, color));
         glEnableVertexAttribArray(1);
         // Texcoord
-        glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, stride, (void*)offsetof(Vertex, texcoord));
+        glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, stride, (void*)offsetof(Vertex, uv));
         glEnableVertexAttribArray(2);
         // Normal
         glVertexAttribPointer(3, 3, GL_FLOAT, GL_FALSE, stride, (void*)offsetof(Vertex, normal));
@@ -1884,7 +1875,7 @@ std::vector<std::unique_ptr<Mesh>> loadOBJWithMTL(const std::string& obj_path) {
 
         glBindVertexArray(0);
 
-        meshes.emplace_back(mesh);
+        meshes.push_back(std::move(mesh));
     }
     
     return meshes;
@@ -1948,13 +1939,18 @@ unsigned char* load_grayscale_data(const std::string& path, int& width, int& hei
     return data;
 }
 
-GLuint packAndLoadORMMap(const std::string& current_material_name, const std::string& ao_path, const std::string& roughness_path, const std::string& metallic_path, const std::string& height_path) {
+struct ORMResult {
+    GLuint textureID;
+    bool hasHeightData;
+};
+
+ORMResult packAndLoadORMMap(const std::string& current_material_name, const std::string& ao_path, const std::string& roughness_path, const std::string& metallic_path, const std::string& height_path) {
     int w_ao, h_ao;
     int w_r, h_r;
     int w_m, h_m;
     int w_h, h_h;
     
-    // Load data for all three maps
+    // Load data for all four maps
     unsigned char* ao_data = load_grayscale_data(ao_path, w_ao, h_ao);
     unsigned char* roughness_data = load_grayscale_data(roughness_path, w_r, h_r);
     unsigned char* metallic_data = load_grayscale_data(metallic_path, w_m, h_m);
@@ -1962,7 +1958,7 @@ GLuint packAndLoadORMMap(const std::string& current_material_name, const std::st
     
     // Must have at least one map to proceed
     if (!ao_data && !roughness_data && !metallic_data && !height_data) {
-        return 0;
+        return { 0, false };
     }
 
     int width = 0, height = 0;
@@ -1971,45 +1967,46 @@ GLuint packAndLoadORMMap(const std::string& current_material_name, const std::st
     else if (metallic_data) { width = w_m; height = h_m; }
     else if (height_data) { width = w_h; height = h_h; }
     
-    if (width == 0 || height == 0) return 0;
+    if (width == 0 || height == 0) return { 0, false };
 
     // Create packed texture buffer (4 channels: R, G, B, A)
     size_t data_size = (size_t)width * height * 4;
     unsigned char* packed_data = new unsigned char[data_size];
 
-    // Create a fallback 1-channel buffer (all white, value 255) for missing maps
     // AO = 1.0, Roughness = 1.0, Metallic = 0.0
     unsigned char* default_channel_data = new unsigned char[width * height];
     
-    // Use loaded data or default to white/black
     unsigned char* final_ao = ao_data ? ao_data : default_channel_data;
     unsigned char* final_roughness = roughness_data ? roughness_data : default_channel_data;
     
-    // Metallic is typically 0.0 (black) for the default dielectric base,
-    // so we must handle its fallback specially if you want a non-metal look
+    // Metallic is typically 0.0 (black) for the default dielectric base
     unsigned char* final_metallic = metallic_data ? metallic_data : default_channel_data;
     if (!metallic_data) memset(final_metallic, 0, width * height); // Set metallic fallback to 0 (black)
     
     // Height map fallback
+    bool hasHeightData = true;
     unsigned char* final_height = height_data ? height_data : default_channel_data;
-    if (!height_data) memset(final_height, 128, width * height);
+    if (!height_data) {
+        memset(final_height, 128, width * height);
+        hasHeightData = false;
+    }
 
     for (int i = 0; i < width * height; ++i) {
-        // R channel gets AO (Occlusion)
-        packed_data[i * 4 + 0] = final_ao[i];
+        // R channel gets AO
+        packed_data[i * 4] = final_ao[i];
         // G channel gets Roughness
         packed_data[i * 4 + 1] = final_roughness[i];
         // B channel gets Metallic
         packed_data[i * 4 + 2] = final_metallic[i];
         // A channel gets Height
         packed_data[i * 4 + 3] = final_height[i];
+        if (final_height[i] == 128) hasHeightData = false;
     }
     
     GLuint orm_texture_id;
     glGenTextures(1, &orm_texture_id);
     glBindTexture(GL_TEXTURE_2D, orm_texture_id);
     
-    // Standard texture parameters (reusing from your loadTexture)
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
@@ -2028,7 +2025,7 @@ GLuint packAndLoadORMMap(const std::string& current_material_name, const std::st
     delete[] default_channel_data;
     
     printf("Successfully created and loaded packed ORM (RGBA) map for material: %s\n", current_material_name.c_str());
-    return orm_texture_id;
+    return { orm_texture_id, hasHeightData };
 }
 
 void loadMTL(const std::string& mtl_path, std::unordered_map<std::string, Material>& materials) {
@@ -2062,7 +2059,9 @@ void loadMTL(const std::string& mtl_path, std::unordered_map<std::string, Materi
             if (!current_material_name.empty() && materials.count(current_material_name)) {
                 // Only pack if at least one map path was found for the previous material
                 if (!current_roughness_path.empty() || !current_metallic_path.empty() || !current_ao_path.empty() || !current_height_path.empty()) {
-                    materials[current_material_name].orm_map = packAndLoadORMMap(current_material_name, current_ao_path, current_roughness_path, current_metallic_path, current_height_path);
+                    ORMResult orm = packAndLoadORMMap(current_material_name, current_ao_path, current_roughness_path, current_metallic_path, current_height_path);
+                    materials[current_material_name].orm_map = orm.textureID;
+                    materials[current_material_name].height_map = orm.hasHeightData;
                 }
             }
             
@@ -2184,7 +2183,9 @@ void loadMTL(const std::string& mtl_path, std::unordered_map<std::string, Materi
     
     if (!current_material_name.empty() && materials.count(current_material_name)) {
         if (!current_roughness_path.empty() || !current_metallic_path.empty() || !current_ao_path.empty() || !current_height_path.empty()) {
-            materials[current_material_name].orm_map = packAndLoadORMMap(current_material_name, current_ao_path, current_roughness_path, current_metallic_path, current_height_path);
+            ORMResult orm = packAndLoadORMMap(current_material_name, current_ao_path, current_roughness_path, current_metallic_path, current_height_path);
+            materials[current_material_name].orm_map = orm.textureID;
+            materials[current_material_name].height_map = orm.hasHeightData;
         }
     }
 }
@@ -2192,12 +2193,9 @@ void loadMTL(const std::string& mtl_path, std::unordered_map<std::string, Materi
 std::vector<std::unique_ptr<Mesh>> loadOBJMesh(const std::string& obj_path) {
     const std::string& full_obj_path = buildAssetPath("OBJ_Models/" + obj_path);
     if (!std::filesystem::exists(full_obj_path)) {
-        std::cerr << "ERROR::OBJ_LOAD::File does not exist: " << full_obj_path << std::endl;
-        
+        std::cerr << "Error: OBJ file does not exist: " << full_obj_path << std::endl;
         // File is missing or permission denied
         std::cerr << "Check your file path or OS file permissions." << std::endl;
-        
-        // Return empty mesh
         return {};
     }
     
@@ -2234,6 +2232,9 @@ int main() {
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
     glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
     
+    // Remove resizability
+    glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
+    
     // Anti-aliasing
     glfwWindowHint(GLFW_SAMPLES, 4);
     
@@ -2257,6 +2258,7 @@ int main() {
     
     // Set up ImGui
     IMGUI_CHECKVERSION();
+    std::remove("imgui.ini"); // Reset GUI menu state
     ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO(); (void)io;
     ImGui::StyleColorsDark();
@@ -2310,12 +2312,12 @@ int main() {
     
     // Cloud skybox
     std::string cloud_skybox_paths[6] = {
-        buildAssetPath("Skyboxes/Cloud_skybox/cloud_skybox_right.png"),   // GL_TEXTURE_CUBE_MAP_POSITIVE_X
-        buildAssetPath("Skyboxes/Cloud_skybox/cloud_skybox_left.png"),    // GL_TEXTURE_CUBE_MAP_NEGATIVE_X
-        buildAssetPath("Skyboxes/Cloud_skybox/cloud_skybox_top.png"),     // GL_TEXTURE_CUBE_MAP_POSITIVE_Y
-        buildAssetPath("Skyboxes/Cloud_skybox/cloud_skybox_bottom.png"),  // GL_TEXTURE_CUBE_MAP_NEGATIVE_Y
-        buildAssetPath("Skyboxes/Cloud_skybox/cloud_skybox_front.png"),   // GL_TEXTURE_CUBE_MAP_POSITIVE_Z
-        buildAssetPath("Skyboxes/Cloud_skybox/cloud_skybox_back.png")     // GL_TEXTURE_CUBE_MAP_NEGATIVE_Z
+        buildAssetPath("skyboxes/Cloud_skybox/cloud_skybox_right.png"),   // GL_TEXTURE_CUBE_MAP_POSITIVE_X
+        buildAssetPath("skyboxes/Cloud_skybox/cloud_skybox_left.png"),    // GL_TEXTURE_CUBE_MAP_NEGATIVE_X
+        buildAssetPath("skyboxes/Cloud_skybox/cloud_skybox_top.png"),     // GL_TEXTURE_CUBE_MAP_POSITIVE_Y
+        buildAssetPath("skyboxes/Cloud_skybox/cloud_skybox_bottom.png"),  // GL_TEXTURE_CUBE_MAP_NEGATIVE_Y
+        buildAssetPath("skyboxes/Cloud_skybox/cloud_skybox_front.png"),   // GL_TEXTURE_CUBE_MAP_POSITIVE_Z
+        buildAssetPath("skyboxes/Cloud_skybox/cloud_skybox_back.png")     // GL_TEXTURE_CUBE_MAP_NEGATIVE_Z
     };
     
     const char* cloud_skybox[6] = {
@@ -2332,15 +2334,16 @@ int main() {
     // LOAD OBJ MESHES //
     
     // Note that when importing new assets you only need to add your files to the main assets folders
-    // You can find the main asset folders at "OpenGL 3D Engine/OpenGL 3D Engine/OBJ_Models" or "OpenGL 3D Engine/OpenGL 3D Engine/Skyboxes"
+    // You can find the main asset folders at "OpenGL 3D Engine/OpenGL 3D Engine/OBJ_Models" or "OpenGL 3D Engine/OpenGL 3D Engine/skyboxes"
     
-    auto level_mesh = loadOBJMesh("Level/level.obj");
-    auto tree_mesh = loadOBJMesh("Realistic_tree/tree.obj");
-    auto instructions_mesh = loadOBJMesh("Instructions_Panel/quad.obj");
-    auto cube_mesh = loadOBJMesh("Cube/cube.obj");
-    auto sphere_mesh = loadOBJMesh("Sphere/sphere.obj");
-    auto streetlight_mesh = loadOBJMesh("Streetlight/streetlight.obj");
-    auto cone_mesh = loadOBJMesh("Cone/cone.obj");
+    auto level_mesh = loadOBJMesh("level/level.obj");
+    auto tree_mesh = loadOBJMesh("realistic_tree/tree.obj");
+    auto instructions_mesh = loadOBJMesh("instructions_panel/quad.obj");
+    auto cube_mesh = loadOBJMesh("cube/cube.obj");
+    auto sphere_mesh = loadOBJMesh("sphere/sphere.obj");
+    auto streetlight_mesh = loadOBJMesh("streetlight/streetlight.obj");
+    auto cone_mesh = loadOBJMesh("cone/cone.obj");
+    auto road_mesh = loadOBJMesh("modular-road/modular_road.obj");
     
     // ============================================================================
     // CREATE SCENE OBJECTS
@@ -2348,11 +2351,11 @@ int main() {
     
     // CREATE LIGHT SOURCES //
     
-    createDirLight("sun", glm::vec3(0, 1, 0), glm::vec3(1, 1, 1), 2500);
-    createPointLight("streetlamp", glm::vec3(-7.05, 3.5, 0.05), glm::vec3(1, 1, 1), 500,
-                    {}, glm::vec3(0.1, 0.1, 0.1), std::vector<int>{CULL_BACK});
-    createSpotlight("torchlight", glm::vec3(0, 0, 0), glm::vec3(1, 1, 1), 250,
-                    glm::vec3(1, 0, 0), 12.5f, 17.5f, glm::vec3(0, 0, 0),
+    createDirLight("sun", glm::vec3(1, -1, -1), glm::vec3(1, 1, 1), 10);
+    createPointLight("streetlamp", glm::vec3(-7.05, 3.5, 0.05), glm::vec3(1, 1, 1), 250,
+                     {}, glm::vec3(0.1, 0.1, 0.1), std::vector<int>{CULL_BACK});
+    createSpotlight("torchlight", glm::vec3(0, 10, 0), glm::vec3(1, 1, 1), 50,
+                    glm::vec3(1, 0, 0), 7.5f, 17.5f, glm::vec3(0, -1, 0),
                     {}, glm::vec3(0.1, 0.1, 0.1), std::vector<int>{CULL_BACK});
     
     // CREATE ENTITIES //
@@ -2362,7 +2365,8 @@ int main() {
     createEntity("instructions", std::move(instructions_mesh), glm::vec3(0, 2, 4), glm::vec3(0, 0, 0), glm::vec3(1, 1, 1), std::vector<int> {CULL_NONE});
     createEntity("cube", std::move(cube_mesh), glm::vec3(5, 3, 0), glm::vec3(0, 0, 0), glm::vec3(1, 1, 1), std::vector<int> {CULL_BACK});
     createEntity("sphere", std::move(sphere_mesh), glm::vec3(0, 2, -5), glm::vec3(0, 0, 0), glm::vec3(1, 1, 1), std::vector<int> {CULL_BACK});
-    createEntity("streetlight", std::move(streetlight_mesh), glm::vec3(-7, 0.05, 0), glm::vec3(1, 1, 1), glm::vec3(1, 1, 1), std::vector<int>{CULL_BACK});
+    createEntity("streetlight", std::move(streetlight_mesh), glm::vec3(-7, 0.02, 0), glm::vec3(0, 0, 0), glm::vec3(1, 1, 1), std::vector<int>{CULL_BACK});
+    createEntity("road", std::move(road_mesh), glm::vec3(10, -10, 0), glm::vec3(0, 0, 0), glm::vec3(1, 1, 1), std::vector<int>{CULL_NONE});
     
     printf("Total triangles: %d\n", total_triangles);
     printf("Active entities: %zu\n", entity_manager.size());
@@ -2384,11 +2388,11 @@ int main() {
             float sin_yaw = sinf(yaw_rad);
             float cos_yaw = cosf(yaw_rad);
             glm::vec3 cam_offset = glm::vec3(0.0f);
-            float camera_speed = speed_multiplier * 0.05f;
+            float actual_cam_speed = tick_speed * cam_speed_multiplier;
             
             // Sprint
             if (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_RIGHT_SHIFT) == GLFW_PRESS) {
-                camera_speed *= 2;
+                actual_cam_speed *= 2;
             }
             
             // Horizontal movement
@@ -2407,16 +2411,16 @@ int main() {
             
             // Vertical movement
             if (glfwGetKey(window, GLFW_KEY_E) == GLFW_PRESS) {
-                global_camera.position.y += camera_speed;
+                global_camera.position.y += actual_cam_speed;
             }
             if (glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS) {
-                global_camera.position.y -= camera_speed;
+                global_camera.position.y -= actual_cam_speed;
             }
             
             if (glm::length(cam_offset) > 0.0f) {
                 cam_offset = glm::normalize(cam_offset);
             }
-            global_camera.position = global_camera.position + cam_offset * camera_speed;
+            global_camera.position = global_camera.position + cam_offset * actual_cam_speed;
             
             // Update camera matrices
             view = camera_get_view_matrix(&global_camera);
@@ -2433,10 +2437,10 @@ int main() {
             
             // UPDATE OBJECTS
             
-            // entity_manager.updateEntity("cube", VEC3_NO_CHANGE, glm::vec3(update_count, update_count * 0.5f, SCALAR_NO_CHANGE), VEC3_NO_CHANGE);
-            entity_manager.updateEntity("sphere", glm::vec3(SCALAR_NO_CHANGE, 2.5 + sinf(update_count * 0.01f), SCALAR_NO_CHANGE), glm::vec3(update_count, 0, 0), VEC3_NO_CHANGE);
+            entity_manager.updateEntity("cube", VEC3_NO_CHANGE, glm::vec3(update_count * 0.1f, update_count * 0.1f, update_count * 0.1f), VEC3_NO_CHANGE);
+            entity_manager.updateEntity("sphere", glm::vec3(SCALAR_NO_CHANGE, 2.5f + sinf(update_count * 0.01f), SCALAR_NO_CHANGE), glm::vec3(update_count, 0, 0), VEC3_NO_CHANGE);
             
-            update_count += speed_multiplier;
+            update_count += tick_speed;
         }
         
         // Clear background
@@ -2497,7 +2501,7 @@ int main() {
         ImGui::Begin("Engine");
         ImGui::Text("FPS: %.1f", fps);
         ImGui::Text("Triangles: %u", total_triangles);
-        if (ImGui::Button("V-Sync ON"))  glfwSwapInterval(1);
+        if (ImGui::Button("V-Sync ON")) glfwSwapInterval(1);
         if (ImGui::Button("V-Sync OFF")) glfwSwapInterval(0);
         ImGui::End();
         
@@ -2507,12 +2511,10 @@ int main() {
         glfwSwapBuffers(window);
         
         // Handle mouse cursor pointerlock/normal modes
-        if (glfwGetInputMode(window, GLFW_CURSOR) == GLFW_CURSOR_NORMAL) {
+        if (glfwGetInputMode(window, GLFW_CURSOR) == GLFW_CURSOR_NORMAL && !ImGui::GetIO().WantCaptureMouse) {
             if (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT)) {
-                if (!ImGui::GetIO().WantCaptureMouse) {
-                    firstMouse = true;
-                    glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED); // Enable pointerlock
-                }
+                firstMouse = true;
+                glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED); // Enable pointerlock
             }
         } else {
             if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS) {
@@ -2521,9 +2523,9 @@ int main() {
         }
         
         // Handle fullscreen entry/exit
-        static bool f_pressed  = false;
-        if (glfwGetKey(window, GLFW_KEY_F) == GLFW_PRESS && !f_pressed) {
-            f_pressed = true;
+        static bool fullscreen_toggle = false;
+        if (glfwGetKey(window, GLFW_KEY_ENTER) == GLFW_PRESS && glfwGetKey(window, GLFW_KEY_LEFT_ALT) && !fullscreen_toggle) {
+            fullscreen_toggle = true;
             
             GLFWmonitor *monitor = glfwGetPrimaryMonitor();
             const GLFWvidmode *vm = glfwGetVideoMode(monitor);
@@ -2531,13 +2533,13 @@ int main() {
                 // Enter fullscreen
                 WINDOW_WIDTH = vm->width;
                 WINDOW_HEIGHT = vm->height;
-                glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL); // free cursor
                 glfwSetWindowMonitor(window, monitor, 0, 0, vm->width, vm->height, vm->refreshRate);
                 fullscreen = true;
             } else {
                 // Leave fullscreen
                 WINDOW_WIDTH = 800;
                 WINDOW_HEIGHT = 600;
+                glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL); // Free cursor
                 glfwSetWindowMonitor(window, nullptr, 0, 0, 800, 600, 0);
                 fullscreen = false;
                 
@@ -2550,7 +2552,7 @@ int main() {
                 glfwSetWindowPos(window, mx + (mw - w) / 2, my + (mh - h) / 2);
             }
         }
-        if (glfwGetKey(window, GLFW_KEY_F) == GLFW_RELEASE) f_pressed = false;
+        if (glfwGetKey(window, GLFW_KEY_ENTER) == GLFW_RELEASE && glfwGetKey(window, GLFW_KEY_LEFT_ALT)) fullscreen_toggle = false;
     }
     
     // ============================================================================
@@ -2562,6 +2564,7 @@ int main() {
     
     if (default_texture_id != 0) {
         glDeleteTextures(1, &default_texture_id);
+        default_texture_id = 0;
     }
     
     cleanupShadowMap();
