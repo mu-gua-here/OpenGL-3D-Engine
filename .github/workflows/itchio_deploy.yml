@@ -16,19 +16,21 @@ jobs:
       - name: Install Dependencies (Linux)
         run: sudo apt-get update && sudo apt-get install -y build-essential libgl-dev
 
-      - name: Configure CMake (Linux)
-        run: cmake -B build_linux -DCMAKE_BUILD_TYPE=Release "OpenGL 3D Engine"
-
-      - name: Build Project (Linux)
-        run: cmake --build build_linux --config Release
+      - name: Configure and Build (Linux)
+        # 1. Change directory to where CMakeLists.txt and source files are located
+        run: |
+          cd "OpenGL 3D Engine"
+          cmake -B ../build_linux -DCMAKE_BUILD_TYPE=Release .
+          cmake --build ../build_linux --config Release
         
       - name: Package and Push to itch.io (Linux)
+        # Using a reliable setup-butler action and running butler via command line
         uses: manleydev/butler-publish-itchio-action@v1.0.3
         env:
           BUTLER_CREDENTIALS: ${{ secrets.BUTLER_API_KEY }}
           ITCH_USER: mu-gua-here
           ITCH_GAME: opengl-3d-engine-demo
-          PACKAGE: build_linux/
+          PACKAGE: build_linux/ # Relative to the workspace root
           CHANNEL: linux
           VERSION: ${{ github.sha }}
 
@@ -36,50 +38,52 @@ jobs:
   # 2. WINDOWS BUILD JOB
 
   build_windows:
-    runs-on: windows-latest # GitHub-hosted Windows runner
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
             
-      - name: Configure CMake (Windows)
-        run: cmake -B build_windows -A x64 -DCMAKE_BUILD_TYPE=Release "OpenGL 3D Engine"
-
-      - name: Build Project (Windows)
-        run: cmake --build build_windows --config Release
+      - name: Configure and Build (Windows)
+        # 1. Change directory to where CMakeLists.txt and source files are located
+        run: |
+          cd "OpenGL 3D Engine"
+          cmake -B ../build_windows -A x64 -DCMAKE_BUILD_TYPE=Release .
+          cmake --build ../build_windows --config Release
         
       - name: Package and Push to itch.io (Windows)
+        # This action is a container action, but it often works on Windows/Linux
         uses: manleydev/butler-publish-itchio-action@v1.0.3
         env:
           BUTLER_CREDENTIALS: ${{ secrets.BUTLER_API_KEY }}
           ITCH_USER: mu-gua-here
           ITCH_GAME: opengl-3d-engine-demo
-          PACKAGE: build_windows/Release/
+          PACKAGE: build_windows/Release/ # Relative to the workspace root
           CHANNEL: windows
           VERSION: ${{ github.sha }}
 
   # 3. MACOS BUILD JOB
 
   build_macos:
-    runs-on: macos-latest # GitHub-hosted macOS runner
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
       
-      - name: Configure CMake (macOS)
-        # FIX: Point to the correct source directory
-        run: cmake -B build_macos -G Xcode -DCMAKE_BUILD_TYPE=Release "OpenGL 3D Engine"
+      - name: Configure and Build (macOS)
+        # 1. Change directory to where CMakeLists.txt and source files are located
+        run: |
+          cd "OpenGL 3D Engine"
+          cmake -B ../build_macos -G Xcode -DCMAKE_BUILD_TYPE=Release .
+          cmake --build ../build_macos --config Release
         
-      - name: Build Project (macOS)
-        run: cmake --build build_macos --config Release
-        
-      - name: Create DMG or ZIP Package (Recommended)
-        # Your executable will likely be in the build_macos/Release/ folder
+      - name: Create ZIP Package
+        # Note: We use the directory relative to the repository root for the zip command
         run: zip -r OpenGL-3D-Engine.zip build_macos/Release/
         
+      - name: Setup Butler
+        # FIX: Use a non-container action to install butler on macOS
+        uses: jdno/setup-butler@v1
+      
       - name: Push to itch.io (macOS)
-        uses: manleydev/butler-publish-itchio-action@v1.0.3
+        # FIX: Run butler using a standard command step
+        run: butler push OpenGL-3D-Engine.zip mu-gua-here/opengl-3d-engine-demo:osx --userversion ${{ github.sha }}
         env:
-          BUTLER_CREDENTIALS: ${{ secrets.BUTLER_API_KEY }}
-          ITCH_USER: mu-gua-here
-          ITCH_GAME: opengl-3d-engine-demo
-          PACKAGE: OpenGL-3D-Engine.zip
-          CHANNEL: osx
-          VERSION: ${{ github.sha }}
+          BUTLER_API_KEY: ${{ secrets.BUTLER_API_KEY }}

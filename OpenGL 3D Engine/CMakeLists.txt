@@ -14,7 +14,19 @@ endif()
 
 # Compiler
 set(CMAKE_CXX_FLAGS_DEBUG "-g -O0 -Wall -Wextra")
-set(CMAKE_CXX_FLAGS_RELEASE "-O3 -DNDEBUG")
+
+# Use -O3 for GNU/Clang, but use /O2 for MSVC (Windows)
+if(MSVC)
+    set(CMAKE_CXX_FLAGS_RELEASE "/O2 /DNDEBUG")
+else()
+    set(CMAKE_CXX_FLAGS_RELEASE "-O3 -DNDEBUG")
+endif()
+
+# Define M_PI and suppress M_PI warnings for cross-platform compatibility
+if(MSVC)
+    add_definitions(-D_USE_MATH_DEFINES)
+    add_compile_options(/wd4244) # Optional: suppress potential truncation warnings
+endif()
 
 # Executable
 add_executable(${PROJECT_NAME}
