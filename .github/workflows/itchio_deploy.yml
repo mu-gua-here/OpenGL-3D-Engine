@@ -1,96 +1,89 @@
-{\rtf1\ansi\ansicpg1252\cocoartf2865
-\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\fswiss\fcharset0 Helvetica;}
-{\colortbl;\red255\green255\blue255;}
-{\*\expandedcolortbl;;}
-\paperw11900\paperh16840\margl1440\margr1440\vieww24780\viewh15040\viewkind0
-\pard\tx720\tx1440\tx2160\tx2880\tx3600\tx4320\tx5040\tx5760\tx6480\tx7200\tx7920\tx8640\pardirnatural\partightenfactor0
+name: Build and Deploy Engine to Itch.io
 
-\f0\fs24 \cf0 name: Build and Deploy Engine to Itch.io\
-\
-on:\
-  push:\
-    branches: [ main ] # Trigger on pushes to main branch\
-\
-jobs:\
-\
-  # 1. LINUX BUILD JOB\
-\
-  build_linux:\
-    runs-on: ubuntu-latest\
-    steps:\
-      - uses: actions/checkout@v4\
-      \
-      - name: Install Dependencies (Linux)\
-        run: sudo apt-get update && sudo apt-get install -y build-essential libgl-dev\
-\
-      - name: Configure CMake (Linux)\
-        run: cmake -B build_linux -DCMAKE_BUILD_TYPE=Release .\
-\
-      - name: Build Project (Linux)\
-        run: cmake --build build_linux --config Release\
-        \
-      - name: Package and Push to itch.io (Linux)\
-        uses: manleydev/butler-publish-itchio-action@v1.0.3\
-        env:\
-          BUTLER_CREDENTIALS: $\{\{ secrets.BUTLER_API_KEY \}\}\
-          ITCH_USER: mu-gua-here\
-          ITCH_GAME: opengl-3d-engine-demo\
-          # Point PACKAGE to the directory containing your final, runnable Linux files\
-          PACKAGE: build_linux/ # Adjust this path based on your CMake output\
-          CHANNEL: linux # The itch.io channel name for Linux\
-          VERSION: $\{\{ github.sha \}\}\
-\
-\
-  # 2. WINDOWS BUILD JOB\
-\
-  build_windows:\
-    runs-on: windows-latest # GitHub-hosted Windows runner\
-    steps:\
-      - uses: actions/checkout@v4\
-            \
-      - name: Configure CMake (Windows)\
-        # Use the default Visual Studio generator\
-        run: cmake -B build_windows -A x64 -DCMAKE_BUILD_TYPE=Release .\
-\
-      - name: Build Project (Windows)\
-        # Use the default generator (MSBuild) to compile the project\
-        run: cmake --build build_windows --config Release\
-        \
-      - name: Package and Push to itch.io (Windows)\
-        uses: manleydev/butler-publish-itchio-action@v1.0.3\
-        env:\
-          BUTLER_CREDENTIALS: $\{\{ secrets.BUTLER_API_KEY \}\}\
-          ITCH_USER: mu-gua-here\
-          ITCH_GAME: opengl-3d-engine-demo\
-          # Point PACKAGE to the directory containing the final, runnable Windows files\
-          PACKAGE: build_windows/Release/\
-          CHANNEL: windows\
-          VERSION: $\{\{ github.sha \}\}\
-\
-  # 3. MACOS BUILD JOB\
-\
-  build_macos:\
-    runs-on: macos-latest # GitHub-hosted macOS runner\
-    steps:\
-      - uses: actions/checkout@v4\
-      \
-      - name: Configure CMake (macOS)\
-        # Use the Xcode generator for a proper macOS build\
-        run: cmake -B build_macos -G Xcode -DCMAKE_BUILD_TYPE=Release .\
-        \
-      - name: Build Project (macOS)\
-        run: cmake --build build_macos --config Release\
-        \
-      - name: Create DMG or ZIP Package (Recommended)\
-        run: zip -r OpenGL-3D-Engine.zip build_macos/Release/\
-        \
-      - name: Push to itch.io (macOS)\
-        uses: manleydev/butler-publish-itchio-action@v1.0.3\
-        env:\
-          BUTLER_CREDENTIALS: $\{\{ secrets.BUTLER_API_KEY \}\}\
-          ITCH_USER: mu-gua-here\
-          ITCH_GAME: opengl-3d-engine-demo\
-          # Push the created ZIP file\
-          PACKAGE: OpenGL-3D-Engine.zip\
-          CHANNEL: osx\
-          VERSION: $\{\{ github.sha \}\}}
+on:
+  push:
+    branches: [ main ] # Trigger on pushes to main branch
+
+jobs:
+
+  # 1. LINUX BUILD JOB
+
+  build_linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install Dependencies (Linux)
+        run: sudo apt-get update && sudo apt-get install -y build-essential libgl-dev
+
+      - name: Configure CMake (Linux)
+        run: cmake -B build_linux -DCMAKE_BUILD_TYPE=Release .
+
+      - name: Build Project (Linux)
+        run: cmake --build build_linux --config Release
+        
+      - name: Package and Push to itch.io (Linux)
+        uses: manleydev/butler-publish-itchio-action@v1.0.3
+        env:
+          BUTLER_CREDENTIALS: ${{ secrets.BUTLER_API_KEY }}
+          ITCH_USER: mu-gua-here
+          ITCH_GAME: opengl-3d-engine-demo
+          # Point PACKAGE to the directory containing your final, runnable Linux files
+          PACKAGE: build_linux/ # Adjust this path based on your CMake output
+          CHANNEL: linux # The itch.io channel name for Linux
+          VERSION: ${{ github.sha }}
+
+
+  # 2. WINDOWS BUILD JOB
+
+  build_windows:
+    runs-on: windows-latest # GitHub-hosted Windows runner
+    steps:
+      - uses: actions/checkout@v4
+            
+      - name: Configure CMake (Windows)
+        # Use the default Visual Studio generator
+        run: cmake -B build_windows -A x64 -DCMAKE_BUILD_TYPE=Release .
+
+      - name: Build Project (Windows)
+        # Use the default generator (MSBuild) to compile the project
+        run: cmake --build build_windows --config Release
+        
+      - name: Package and Push to itch.io (Windows)
+        uses: manleydev/butler-publish-itchio-action@v1.0.3
+        env:
+          BUTLER_CREDENTIALS: ${{ secrets.BUTLER_API_KEY }}
+          ITCH_USER: mu-gua-here
+          ITCH_GAME: opengl-3d-engine-demo
+          # Point PACKAGE to the directory containing the final, runnable Windows files
+          PACKAGE: build_windows/Release/
+          CHANNEL: windows
+          VERSION: ${{ github.sha }}
+
+  # 3. MACOS BUILD JOB
+
+  build_macos:
+    runs-on: macos-latest # GitHub-hosted macOS runner
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Configure CMake (macOS)
+        # Use the Xcode generator for a proper macOS build
+        run: cmake -B build_macos -G Xcode -DCMAKE_BUILD_TYPE=Release .
+        
+      - name: Build Project (macOS)
+        run: cmake --build build_macos --config Release
+        
+      - name: Create DMG or ZIP Package (Recommended)
+        run: zip -r OpenGL-3D-Engine.zip build_macos/Release/
+        
+      - name: Push to itch.io (macOS)
+        uses: manleydev/butler-publish-itchio-action@v1.0.3
+        env:
+          BUTLER_CREDENTIALS: ${{ secrets.BUTLER_API_KEY }}
+          ITCH_USER: mu-gua-here
+          ITCH_GAME: opengl-3d-engine-demo
+          # Push the created ZIP file
+          PACKAGE: OpenGL-3D-Engine.zip
+          CHANNEL: osx
+          VERSION: ${{ github.sha }}
