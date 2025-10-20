@@ -1,12 +1,9 @@
 cmake_minimum_required(VERSION 3.16)
-project(OpenGL_3D_Engine)
+project(OpenGL-3D-Engine)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-
-if(NOT CMAKE_BUILD_TYPE)
-    set(CMAKE_BUILD_TYPE Release)
-endif()
+set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Build type" FORCE)
 
 # macOS
 if(APPLE)
@@ -18,37 +15,41 @@ endif()
 # Compiler
 set(CMAKE_CXX_FLAGS_DEBUG "-g -O0 -Wall -Wextra")
 set(CMAKE_CXX_FLAGS_RELEASE "-O3 -DNDEBUG")
-add_definitions(-DGLFW_INCLUDE_NONE)
+
+# Executable
+add_executable(${PROJECT_NAME}
+    src/main.cpp
+    external/glad/src/glad.c
+
+    # ImGui core
+    external/imgui/imgui.cpp
+    external/imgui/imgui_demo.cpp
+    external/imgui/imgui_draw.cpp
+    external/imgui/imgui_tables.cpp
+    external/imgui/imgui_widgets.cpp
+
+    # ImGui backends
+    external/imgui/imgui_impl_glfw.cpp
+    external/imgui/imgui_impl_opengl3.cpp
+)
+
+target_compile_definitions(${PROJECT_NAME} PRIVATE GLFW_INCLUDE_NONE)
 
 # Include dirs
-include_directories(
+target_include_directories(${PROJECT_NAME} PRIVATE
     external/glad/include
     external/glfw/include
     external/glm
     external/stb
-    imgui # imgui headers are here
-)
-
-# Executable
-add_executable(${PROJECT_NAME}
-    main.cpp
-    external/glad/src/glad.c
-
-    # ImGui core
-    imgui/imgui.cpp
-    imgui/imgui_demo.cpp
-    imgui/imgui_draw.cpp
-    imgui/imgui_tables.cpp
-    imgui/imgui_widgets.cpp
-
-    # ImGui backends
-    imgui/imgui_impl_glfw.cpp
-    imgui/imgui_impl_opengl3.cpp
+    external/imgui
+    external/assimp/include
 )
 
 # Link
-target_link_libraries(${PROJECT_NAME}
+target_link_libraries(${PROJECT_NAME} PRIVATE
     "${CMAKE_SOURCE_DIR}/external/glfw/libglfw3.a"
+    "${CMAKE_SOURCE_DIR}/external/assimp/libassimp.a"
+    "-lz"
     "-framework Cocoa"
     "-framework IOKit"
     "-framework CoreVideo"

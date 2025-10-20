@@ -1,3 +1,5 @@
+If you only want to test the project and not view the code I suggest you head to itch.io to run my project with ease: https://mu-gua-here.itch.io/opengl-3d-engine-demo
+
 Follow the steps below to run this project locally on your computer.
 
 Step 1: Clone the Repository (Universal)
