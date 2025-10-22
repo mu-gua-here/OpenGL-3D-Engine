@@ -75,6 +75,7 @@
 #include <glm/gtc/type_ptr.hpp>
 #include <glm/gtx/hash.hpp>
 #include <glm/gtx/string_cast.hpp>
+#include <glm/gtx/euler_angles.hpp>
 
 // Function prototypes
 void mouse_callback(GLFWwindow* window, double xpos, double ypos);
