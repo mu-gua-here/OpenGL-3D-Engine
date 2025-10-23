@@ -18,8 +18,33 @@ jobs:
 
       - name: Configure and Build (Linux)
         run: |
+          set -euo pipefail
           mkdir -p dist/linux
-          cp build_linux/bin/OpenGL-3D-Engine dist/linux/
+
+          # If this repo uses CMake, configure and build a Release binary.
+          if [ -f CMakeLists.txt ]; then
+            cmake -S . -B build_linux -DCMAKE_BUILD_TYPE=Release
+            cmake --build build_linux -- -j$(nproc)
+          fi
+
+          # Try to find the binary in common places (handles build/bin, Release, nested paths and spaces)
+          BIN=$(find build_linux build -type f -name 'OpenGL-3D-Engine' -perm /111 2>/dev/null | head -n1 || true)
+          if [ -z "$BIN" ]; then
+            BIN=$(find . -type f -path '*/Release/OpenGL-3D-Engine*' -perm /111 2>/dev/null | head -n1 || true)
+          fi
+          if [ -z "$BIN" ]; then
+            # search workspace to catch nested directories or unusual layouts (quotes handle spaces)
+            BIN=$(find "$GITHUB_WORKSPACE" -type f -name 'OpenGL-3D-Engine' -perm /111 2>/dev/null | head -n1 || true)
+          fi
+
+          if [ -z "$BIN" ]; then
+            echo "ERROR: Could not find built binary 'OpenGL-3D-Engine'." >&2
+            echo "Searched: build_linux/, build/, */Release/, and the repository workspace." >&2
+            exit 1
+          fi
+
+          echo "Found binary at: $BIN"
+          cp "$BIN" dist/linux/
           cp -r assets shaders dist/linux/
           
       - name: Push to itch.io (Linux)
@@ -40,10 +65,36 @@ jobs:
     steps:
       - uses: actions/checkout@v4
             
-      - name: Package Windows Build
+      - name: Build (Windows) - optional
+        shell: pwsh
         run: |
+          # If you use CMake on Windows, build the Release configuration
+          if (Test-Path CMakeLists.txt) {
+            cmake -S . -B build_windows -G "Visual Studio 17 2022" -A x64 -DCMAKE_BUILD_TYPE=Release
+            cmake --build build_windows --config Release
+          }
+
+      - name: Package Windows Build
+        shell: bash
+        run: |
+          set -euo pipefail
           mkdir -p dist/windows
-          cp build_windows/Release/OpenGL-3D-Engine.exe dist/windows/
+
+          EXE=$(find build_windows -type f -name 'OpenGL-3D-Engine.exe' 2>/dev/null | head -n1 || true)
+          if [ -z "$EXE" ]; then
+            EXE=$(find . -type f -path '*/Release/OpenGL-3D-Engine.exe' 2>/dev/null | head -n1 || true)
+          fi
+          if [ -z "$EXE" ]; then
+            EXE=$(find "$GITHUB_WORKSPACE" -type f -name 'OpenGL-3D-Engine.exe' 2>/dev/null | head -n1 || true)
+          fi
+
+          if [ -z "$EXE" ]; then
+            echo "ERROR: Could not find OpenGL-3D-Engine.exe" >&2
+            exit 1
+          fi
+
+          echo "Found exe at: $EXE"
+          cp "$EXE" dist/windows/
           cp -r assets shaders dist/windows/
           
       - name: Push to itch.io (Windows)
@@ -72,7 +123,15 @@ jobs:
       - name: Package macOS Build
         run: |
           mkdir -p dist/macos
-          cp build_macos/Release/OpenGL-3D-Engine dist/macos/
+          BIN=$(find build_macos -type f -name 'OpenGL-3D-Engine' 2>/dev/null | head -n1 || true)
+          if [ -z "$BIN" ]; then
+            BIN=$(find . -type f -path '*/Release/OpenGL-3D-Engine*' 2>/dev/null | head -n1 || true)
+          fi
+          if [ -z "$BIN" ]; then
+            echo "ERROR: Could not find macOS binary" >&2
+            exit 1
+          fi
+          cp "$BIN" dist/macos/
           cp -r assets shaders dist/macos/
           
       - name: Push to itch.io (macOS)
