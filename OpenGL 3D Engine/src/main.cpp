@@ -30,12 +30,13 @@
  2. If height map present everything else becomes overwritten
  3. Fix self-shadowing artifacts in POM
  4. Fix bug for ImGui window mouse interaction
+ 5. 3D mesh loader not able to correctly set BFC modes
  
  */
 
 // OpenGL-related
-#include <GLFW/glfw3.h>
 #include "glad/glad.h"
+#include <GLFW/glfw3.h>
 
 // ImGui
 #include "imgui_impl_glfw.h"
@@ -108,8 +109,8 @@ unsigned int entity_count = 0;
 // Shadow mapping
 GLuint shadowMapFBO = 0;
 GLuint shadowMapTexture = 0;
-const unsigned int SHADOW_WIDTH = 8192;
-const unsigned int SHADOW_HEIGHT = 8192;
+unsigned int SHADOW_WIDTH = 4096;
+unsigned int SHADOW_HEIGHT = 4096;
 glm::mat4 lightSpaceMatrix;
 
 // Game settings
@@ -122,7 +123,6 @@ unsigned int skyboxID;
 GLuint default_texture_id = 0;
 
 const glm::vec3 VEC3_NO_CHANGE = glm::vec3(NAN, NAN, NAN);
-const float SCALAR_NO_CHANGE = NAN;
 
 void updateFPS(GLFWwindow* window) {
     static double lastTime = glfwGetTime();
@@ -152,34 +152,13 @@ void updateFPS(GLFWwindow* window) {
 // ============================================================================
 
 std::string getProjectRoot() {
-    std::filesystem::path exe_path;
-    
-    #ifdef __APPLE__
-        char path[1024];
-        uint32_t size = sizeof(path);
-        if (_NSGetExecutablePath(path, &size) == 0) {
-            exe_path = std::filesystem::canonical(path).parent_path();
-        } else {
-            exe_path = std::filesystem::current_path();
-        }
-    #else
-        exe_path = std::filesystem::current_path();
-    #endif
-    
-    std::filesystem::path project_root = exe_path;
-    
-    // Search upward for scene_models directory (will find source directory)
-    while (!std::filesystem::exists(project_root / "scene_models") &&
-           project_root != project_root.parent_path()) {
-        project_root = project_root.parent_path();
+    std::filesystem::path exe_path = std::filesystem::current_path();
+    while (!std::filesystem::exists(exe_path / "scene_models") && 
+           exe_path != exe_path.parent_path()) {
+        exe_path = exe_path.parent_path();
     }
-    
-    if (!std::filesystem::exists(project_root / "scene_models")) {
-        printf("ERROR: Could not find scene_models directory!\n");
-        printf("Searched up from: %s\n", exe_path.string().c_str());
-    }
-    
-    return project_root.string();
+    printf("Project root: %s\n", exe_path.string().c_str());
+    return exe_path.string();
 }
 
 std::string buildAssetPath(const std::string& relative_path) {
@@ -475,30 +454,53 @@ public:
         entities.push_back(std::move(entity));
         return entities.size() - 1;
     }
-    
-    bool updateEntity(std::string name, const glm::vec3& pos, const glm::vec3& rot, const glm::vec3& scale) {
-        for (size_t i = 0; i < entities.size(); i++) {
+
+    int findEntity(std::string name) {
+        for (int i = 0; i < entities.size(); i++) {
             if (entities[i].active && entities[i].name == name) {
-                
-                // Positions
-                if (!isnan(pos.x)) entities[i].position.x = pos.x;
-                if (!isnan(pos.y)) entities[i].position.y = pos.y;
-                if (!isnan(pos.z)) entities[i].position.z = pos.z;
-                
-                // Rotations
-                if (!isnan(rot.x)) entities[i].rotation.x = rot.x;
-                if (!isnan(rot.y)) entities[i].rotation.y = rot.y;
-                if (!isnan(rot.z)) entities[i].rotation.z = rot.z;
-                
-                // Scale
-                if (!isnan(scale.x)) entities[i].scale.x = scale.x;
-                if (!isnan(scale.y)) entities[i].scale.y = scale.y;
-                if (!isnan(scale.z)) entities[i].scale.z = scale.z;
-                
-                return true;
+                return i;
             }
         }
-        return false;
+        return -1;
+    }
+    
+    int updateEntity(std::string name, const glm::vec3& pos, const glm::vec3& rot, const glm::vec3& scale) {
+        int i = findEntity(name);
+        if (i == -1) return -1;
+
+        // Positions
+        if (!isnan(pos.x)) entities[i].position.x = pos.x;
+        if (!isnan(pos.y)) entities[i].position.y = pos.y;
+        if (!isnan(pos.z)) entities[i].position.z = pos.z;
+        
+        // Rotations
+        if (!isnan(rot.x)) entities[i].rotation.x = rot.x;
+        if (!isnan(rot.y)) entities[i].rotation.y = rot.y;
+        if (!isnan(rot.z)) entities[i].rotation.z = rot.z;
+        
+        // Scale
+        if (!isnan(scale.x)) entities[i].scale.x = scale.x;
+        if (!isnan(scale.y)) entities[i].scale.y = scale.y;
+        if (!isnan(scale.z)) entities[i].scale.z = scale.z;
+
+        return i;
+    }
+
+    void updateEntity(int index, const glm::vec3& pos, const glm::vec3& rot, const glm::vec3& scale) {        
+        // Positions
+        if (!isnan(pos.x)) entities[index].position.x = pos.x;
+        if (!isnan(pos.y)) entities[index].position.y = pos.y;
+        if (!isnan(pos.z)) entities[index].position.z = pos.z;
+        
+        // Rotations
+        if (!isnan(rot.x)) entities[index].rotation.x = rot.x;
+        if (!isnan(rot.y)) entities[index].rotation.y = rot.y;
+        if (!isnan(rot.z)) entities[index].rotation.z = rot.z;
+        
+        // Scale
+        if (!isnan(scale.x)) entities[index].scale.x = scale.x;
+        if (!isnan(scale.y)) entities[index].scale.y = scale.y;
+        if (!isnan(scale.z)) entities[index].scale.z = scale.z;
     }
     
     size_t size() const { return entities.size(); }
@@ -635,8 +637,6 @@ typedef struct {
     
     // Spotlight-specific parameters
     glm::vec3 direction;
-    glm::vec3 initial_direction;
-    glm::vec3 euler_rotation;
     float inner_cutoff_cos;
     float outer_cutoff_cos;
     int type;
@@ -645,6 +645,14 @@ typedef struct {
 } Light;
 
 std::vector<Light> lights;
+
+glm::vec3 convertVecToEuler(glm::vec3 direction, glm::vec3 offset) {
+    glm::mat4 rotationMatrix = glm::inverse(glm::lookAt(glm::vec3(0, 0, 0), direction, glm::vec3(0.0f, 1.0f, 0.0f)));
+    float yaw, pitch, roll;
+    glm::extractEulerAngleZYX(rotationMatrix, yaw, pitch, roll);
+    glm::vec3 euler_rot = glm::vec3(glm::degrees(roll) + offset.x, glm::degrees(pitch) + offset.y, glm::degrees(yaw) + offset.z);
+    return euler_rot;
+}
 
 void createDirLight(std::string name, glm::vec3 direction, glm::vec3 color, int intensity) {
     Light light;
@@ -656,34 +664,50 @@ void createDirLight(std::string name, glm::vec3 direction, glm::vec3 color, int 
     light.inner_cutoff_cos = -1.0f;
     light.outer_cutoff_cos = -1.0f;
     light.type = DIR_LIGHT;
-    
     light.entity_name = name;
+
+    if (lights.empty()) {
+        SHADOW_HEIGHT = 16384;
+        SHADOW_WIDTH = 16384;
+    }
+
     lights.push_back(light);
+
+    if (lights.size() > MAX_LIGHTS) {
+        printf("Warning: Exceeded maximum number of lights (%d). Additional lights will be ignored in shaders.\n", MAX_LIGHTS);
+        return;
+    }
 }
 
 void createSpotlight(std::string name, glm::vec3 position, glm::vec3 color, int intensity,
-                     glm::vec3 initial_direction, float inner_angle_deg, float outer_angle_deg, glm::vec3 rotation,
+                     glm::vec3 direction, float inner_angle_deg, float outer_angle_deg,
                      std::vector<std::unique_ptr<Mesh>>&& light_mesh, glm::vec3 scale, std::vector<int> cull_mode) {
     Light light;
     light.position = position;
     light.color = color;
     light.intensity = intensity;
     
-    // Store the initial/local direction and rotation
-    light.initial_direction = glm::normalize(initial_direction);
-    light.euler_rotation = rotation;
-    
-    light.direction = glm::normalize(initial_direction);
+    light.direction = glm::normalize(direction);
     
     light.inner_cutoff_cos = glm::cos(glm::radians(inner_angle_deg));
     light.outer_cutoff_cos = glm::cos(glm::radians(outer_angle_deg));
     light.type = SPOT_LIGHT;
-
     light.entity_name = name;
+
+    if (lights.empty()) {
+        SHADOW_HEIGHT = 8192;
+        SHADOW_WIDTH = 8192;
+    }
+
     lights.push_back(light);
-    
-    // The light's entity also needs to be created with the rotation
-    createEntity(light.entity_name, std::move(light_mesh), position, rotation, scale, cull_mode);
+    glm::vec3 rotation = convertVecToEuler(light.direction, glm::vec3(0.0f));
+
+    if (lights.size() > MAX_LIGHTS) {
+        printf("Warning: Exceeded maximum number of lights (%d). Additional lights will be ignored in shaders.\n", MAX_LIGHTS);
+        return;
+    }
+
+    if (!light_mesh.empty()) createEntity(light.entity_name, std::move(light_mesh), position, rotation, scale, cull_mode);
 }
 
 void createPointLight(std::string name, glm::vec3 position, glm::vec3 color, int intensity,
@@ -698,10 +722,51 @@ void createPointLight(std::string name, glm::vec3 position, glm::vec3 color, int
     light.inner_cutoff_cos = -1.0f;
     light.outer_cutoff_cos = -1.0f;
     light.type = POINT_LIGHT;
-    
     light.entity_name = name;
+    
+    if (lights.empty()) {
+        SHADOW_HEIGHT = 8192;
+        SHADOW_WIDTH = 8192;
+    }
+
     lights.push_back(light);
-    createEntity(light.entity_name, std::move(light_mesh), position, light.direction, scale, cull_mode);
+
+    if (lights.size() > MAX_LIGHTS) {
+        printf("Warning: Exceeded maximum number of lights (%d). Additional lights will be ignored in shaders.\n", MAX_LIGHTS);
+        return;
+    }
+
+    if (!light_mesh.empty()) createEntity(light.entity_name, std::move(light_mesh), position, light.direction, scale, cull_mode);
+}
+
+void updateLight(std::string name, glm::vec3 position, glm::vec3 color, int intensity, glm::vec3 rotation, glm::vec3 offset) {
+    int lightIndex = -1;
+    for (int i = 0; i < lights.size(); i++) {
+        if (lights[i].entity_name == name) {
+            lightIndex = i;
+            break;
+        }
+    }
+    
+    if (lightIndex == -1) {
+        printf("Warning: Light '%s' not found\n", name.c_str());
+        return;
+    }
+    
+    if (!isnan(position.x)) lights[lightIndex].position.x = position.x;
+    if (!isnan(position.y)) lights[lightIndex].position.y = position.y;
+    if (!isnan(position.z)) lights[lightIndex].position.z = position.z;
+    
+    if (!isnan(color.r)) lights[lightIndex].color.r = color.r;
+    if (!isnan(color.g)) lights[lightIndex].color.g = color.g;
+    if (!isnan(color.b)) lights[lightIndex].color.b = color.b;
+    
+    if (intensity >= 0) lights[lightIndex].intensity = intensity;
+
+    if (!isnan(rotation.x) && !isnan(rotation.y) && !isnan(rotation.z)) {
+        lights[lightIndex].direction = glm::normalize(rotation);
+        entity_manager.updateEntity(name, position, convertVecToEuler(rotation, offset), VEC3_NO_CHANGE);
+    }
 }
 
 // ============================================================================
@@ -979,7 +1044,7 @@ float calcShadow(vec4 fragLight, vec3 N, vec3 L) {
     if (proj.z > 1.0) return 0.0;
 
     // Apply bias to account for self-shadowing acne
-    float bias = max(0.0005 * tan(acos(dot(N, L))), 0.0002);
+    float bias = max(0.0001 * tan(acos(dot(N, L))), 0.00001);
     vec3 shadowPos = vec3(fragLight) + L * bias; // Push vertex along normal
     proj.z = (shadowPos.z / fragLight.w) * 0.5 + 0.5 - bias; // Apply to depth
 
@@ -1389,7 +1454,7 @@ public:
             glm::vec3 finalDir = glm::normalize(light.direction); // light shines in –L
             glm::vec3 up = std::abs(finalDir.y) > 0.999f ? glm::vec3(0, 0, 1) : glm::vec3(0, 1, 0);
             glm::mat4 lightView = glm::lookAt(global_camera.position - finalDir * 300.0f * 0.5f, global_camera.position, up);
-            glm::mat4 lightProjection = glm::ortho(-75.0f, 75.0f, -75.0f, 75.0f, 0.1f, 300.0f);
+            glm::mat4 lightProjection = glm::ortho(-50.0f, 50.0f, -50.0f, 50.0f, 0.1f, 300.0f);
             
             lightSpaceMatrix = lightProjection * lightView;
         }
@@ -2071,7 +2136,7 @@ int main() {
     createPointLight("streetlamp", glm::vec3(-7.05, 3.5, 0.05), glm::vec3(1, 1, 1), 250,
                      {}, glm::vec3(0.1, 0.1, 0.1), std::vector<int>{CULL_BACK});
     createSpotlight("torchlight", glm::vec3(0, 10, 0), glm::vec3(1, 1, 1), 50,
-                    glm::vec3(1, 0, 0), 7.5f, 17.5f, glm::vec3(0, -1, 0),
+                    glm::vec3(0, -1, 0), 7.5f, 17.5f,
                     {}, glm::vec3(0.1, 0.1, 0.1), std::vector<int>{CULL_BACK});
     
     // CREATE ENTITIES //
@@ -2083,7 +2148,8 @@ int main() {
     createEntity("sphere", std::move(sphere_mesh), glm::vec3(0, 2, -5), glm::vec3(0, 0, 0), glm::vec3(1, 1, 1), std::vector<int> {CULL_BACK});
     createEntity("streetlight", std::move(streetlight_mesh), glm::vec3(-7, 0.02, 0), glm::vec3(0, 0, 0), glm::vec3(1, 1, 1), std::vector<int>{CULL_BACK});
     createEntity("road", std::move(road_mesh), glm::vec3(50, 0, 0), glm::vec3(0, 0, 0), glm::vec3(1, 1, 1), std::vector<int>{CULL_NONE});
-    
+    createEntity("cone", std::move(cone_mesh), glm::vec3(0, 0, 0), glm::vec3(0, 0, 0), glm::vec3(0.1, 0.1, 0.1), std::vector<int>{CULL_BACK});
+
     printf("Total triangles: %d\n", total_triangles);
     printf("Active entities: %zu\n", entity_manager.size());
     
@@ -2148,13 +2214,13 @@ int main() {
             
             // UPDATE LIGHTS
             
-            lights[2].position = glm::vec3(global_camera.position);
-            lights[2].direction = glm::vec3(global_camera.front);
+            updateLight("torchlight", glm::vec3(global_camera.position + global_camera.front + glm::vec3(-sin_yaw * 0.3f, 0, cos_yaw * 0.3f)), VEC3_NO_CHANGE, -1, glm::vec3(global_camera.front), glm::vec3(0, 0, 0));
             
             // UPDATE OBJECTS
             
             entity_manager.updateEntity("cube", VEC3_NO_CHANGE, glm::vec3(update_count * 0.1f, update_count * 0.1f, update_count * 0.1f), VEC3_NO_CHANGE);
-            entity_manager.updateEntity("sphere", glm::vec3(SCALAR_NO_CHANGE, 2.5f + sinf(update_count * 0.01f), SCALAR_NO_CHANGE), glm::vec3(update_count, 0, 0), VEC3_NO_CHANGE);
+            entity_manager.updateEntity("sphere", glm::vec3(NAN, 2.5f + sinf(update_count * 0.01f), NAN), glm::vec3(update_count, 0, 0), VEC3_NO_CHANGE);
+            entity_manager.updateEntity("cone", glm::vec3(global_camera.position + global_camera.front + glm::vec3(-sin_yaw * 0.3f, 0, cos_yaw * 0.3f)), convertVecToEuler(global_camera.front, glm::vec3(90, 0, 0)), VEC3_NO_CHANGE);
             
             update_count += tick_speed;
         }
@@ -2337,3 +2403,4 @@ void framebuffer_size_callback(GLFWwindow* window, int width, int height) {
         global_camera.aspect_ratio = static_cast<float>(width) / static_cast<float>(height);
     }
 }
+
