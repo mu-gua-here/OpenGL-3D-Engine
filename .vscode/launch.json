@@ -1,0 +1,31 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Debug",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/bin/Debug/OpenGL-3D-Engine",
+            "args": [],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",  // Important: Keep this as project root for asset loading
+            "environment": [],
+            "externalConsole": false,
+            "MIMode": "lldb",
+            "preLaunchTask": "Build Debug"  // Requires tasks.json to define this
+        },
+        {
+            "name": "Release",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/bin/Release/OpenGL-3D-Engine",
+            "args": [],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",  // Important: Keep this as project root for asset loading
+            "environment": [],
+            "externalConsole": false,
+            "MIMode": "lldb",
+            "preLaunchTask": "Build Release"  // Requires tasks.json to define this
+        }
+    ]
+}

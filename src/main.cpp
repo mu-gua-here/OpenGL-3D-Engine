@@ -151,22 +151,14 @@ void updateFPS(GLFWwindow* window) {
 // ASSET PATH BUILDING
 // ============================================================================
 
-std::string getProjectRoot() {
-    std::filesystem::path exe_path = std::filesystem::current_path();
-    while (!std::filesystem::exists(exe_path / "scene_models") && 
-           exe_path != exe_path.parent_path()) {
-        exe_path = exe_path.parent_path();
-    }
-    printf("Project root: %s\n", exe_path.string().c_str());
-    return exe_path.string();
+std::string getExecutablePath() {
+    std::filesystem::path executable_path = std::filesystem::current_path();
+    printf("Working directory: %s\n", executable_path.string().c_str());
+    return executable_path.string();
 }
 
 std::string buildAssetPath(const std::string& relative_path) {
-    static std::string project_root;
-    if (project_root.empty()) {
-        project_root = getProjectRoot();
-    }
-    return project_root + "/" + relative_path;
+    return getExecutablePath() + "/" + relative_path;
 }
 
 std::string resolveTexturePath(const std::string& modelPath, const std::string& textureName) {
