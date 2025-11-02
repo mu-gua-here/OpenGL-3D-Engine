@@ -7,6 +7,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Platform-specific settings
 if(APPLE)
+    set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64" CACHE STRING "Build architectures for macOS")
     add_compile_options(-Wno-deprecated-declarations)
     add_definitions(-DGL_SILENCE_DEPRECATION)
 endif()
@@ -22,7 +23,7 @@ else()
     set(CMAKE_CXX_FLAGS_RELEASE "-O3 -DNDEBUG")
 endif()
 
-# Output directories (simplified)
+# Output directories
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
@@ -51,6 +52,13 @@ add_executable(${PROJECT_NAME}
     external/imgui/imgui_impl_glfw.cpp
     external/imgui/imgui_impl_opengl3.cpp
 )
+
+if(APPLE)
+    # macOS-specific configuration
+    target_link_options(OpenGL-3D-Engine PRIVATE
+        -Wl,-sectcreate,__TEXT,__info_plist,${CMAKE_CURRENT_SOURCE_DIR}/Info.plist
+    )
+endif()
 
 # Include directories
 target_include_directories(${PROJECT_NAME} PRIVATE
@@ -99,7 +107,10 @@ set_target_properties(${PROJECT_NAME} PROPERTIES
 )
 
 # Installation rules
-install(TARGETS ${PROJECT_NAME} RUNTIME DESTINATION ".")
+install(TARGETS ${PROJECT_NAME}
+    BUNDLE DESTINATION .
+)
+
 install(DIRECTORY 
     "${CMAKE_SOURCE_DIR}/scene_models"
     "${CMAKE_SOURCE_DIR}/skyboxes"
