@@ -17,7 +17,7 @@ if(MSVC)
     set(CMAKE_CXX_FLAGS_DEBUG "/Od /Zi /DEBUG")
     set(CMAKE_CXX_FLAGS_RELEASE "/O2 /DNDEBUG")
     add_definitions(-D_USE_MATH_DEFINES)
-    add_compile_options(/wd4244)
+    add_compile_options(/wd4244 /wd4005)
 else()
     set(CMAKE_CXX_FLAGS_DEBUG "-g -O0 -Wall -Wextra")
     set(CMAKE_CXX_FLAGS_RELEASE "-O3 -DNDEBUG")
@@ -34,7 +34,6 @@ if(NOT CMAKE_CONFIGURATION_TYPES)
 endif()
 
 # Set output directories for multi-config
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 foreach(CONFIG ${CMAKE_CONFIGURATION_TYPES})
     string(TOUPPER ${CONFIG} CONFIG_UPPER)
     set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_${CONFIG_UPPER} ${CMAKE_BINARY_DIR}/bin/${CONFIG})
@@ -55,7 +54,7 @@ add_executable(${PROJECT_NAME}
 
 if(APPLE)
     # macOS-specific configuration
-    target_link_options(OpenGL-3D-Engine PRIVATE
+    target_link_options(${PROJECT_NAME} PRIVATE
         -Wl,-sectcreate,__TEXT,__info_plist,${CMAKE_CURRENT_SOURCE_DIR}/Info.plist
     )
 endif()
@@ -63,39 +62,72 @@ endif()
 # Include directories
 target_include_directories(${PROJECT_NAME} PRIVATE
     external/glad/include
-    external/glfw/include
     external/glm
     external/stb
     external/imgui
-    external/assimp/include
 )
 
-# Link libraries
-if(APPLE)
+# Try to use system/vcpkg libraries first, fallback to local copies
+if(WIN32 AND DEFINED ENV{VCPKG_ROOT})
+    # Windows with vcpkg
+    find_package(glfw3 CONFIG REQUIRED)
+    find_package(assimp CONFIG REQUIRED)
+    
     target_link_libraries(${PROJECT_NAME} PRIVATE
-        "${CMAKE_SOURCE_DIR}/external/glfw/libglfw3.a"
-        "${CMAKE_SOURCE_DIR}/external/assimp/libassimp.a"
+        glfw
+        assimp::assimp
+        opengl32
+    )
+    
+elseif(APPLE AND GLFW_LIBRARY AND ASSIMP_LIBRARY)
+    # macOS with Homebrew (CI build)
+    target_include_directories(${PROJECT_NAME} PRIVATE
+        ${GLFW_INCLUDE_DIR}
+        ${ASSIMP_INCLUDE_DIR}
+    )
+    
+    target_link_libraries(${PROJECT_NAME} PRIVATE
+        ${GLFW_LIBRARY}
+        ${ASSIMP_LIBRARY}
         "-framework OpenGL"
         "-framework Cocoa"
         "-framework IOKit"
         "-framework CoreVideo"
-        "-lz"
     )
-elseif(WIN32)
-    target_link_libraries(${PROJECT_NAME} PRIVATE
-        "${CMAKE_SOURCE_DIR}/external/glfw/glfw3.lib"
-        "${CMAKE_SOURCE_DIR}/external/assimp/assimp.lib"
-        opengl32
+    
+else()
+    # Use local precompiled libraries (development)
+    target_include_directories(${PROJECT_NAME} PRIVATE
+        external/glfw/include
+        external/assimp/include
     )
-else() # Linux
-    find_package(OpenGL REQUIRED)
-    target_link_libraries(${PROJECT_NAME} PRIVATE
-        OpenGL::GL
-        "${CMAKE_SOURCE_DIR}/external/glfw/libglfw3.a"
-        "${CMAKE_SOURCE_DIR}/external/assimp/libassimp.a"
-        dl
-        pthread
-    )
+    
+    if(APPLE)
+        target_link_libraries(${PROJECT_NAME} PRIVATE
+            "${CMAKE_SOURCE_DIR}/external/glfw/libglfw3.a"
+            "${CMAKE_SOURCE_DIR}/external/assimp/libassimp.a"
+            "-framework OpenGL"
+            "-framework Cocoa"
+            "-framework IOKit"
+            "-framework CoreVideo"
+            "-lz"
+        )
+    elseif(WIN32)
+        target_link_libraries(${PROJECT_NAME} PRIVATE
+            "${CMAKE_SOURCE_DIR}/external/glfw/glfw3.lib"
+            "${CMAKE_SOURCE_DIR}/external/assimp/assimp.lib"
+            opengl32
+        )
+    else() # Linux
+        find_package(OpenGL REQUIRED)
+        target_link_libraries(${PROJECT_NAME} PRIVATE
+            OpenGL::GL
+            "${CMAKE_SOURCE_DIR}/external/glfw/libglfw3.a"
+            "${CMAKE_SOURCE_DIR}/external/assimp/libassimp.a"
+            dl
+            pthread
+        )
+    endif()
 endif()
 
 # Ensure target properties are set for multi-config
@@ -109,6 +141,7 @@ set_target_properties(${PROJECT_NAME} PROPERTIES
 # Installation rules
 install(TARGETS ${PROJECT_NAME}
     BUNDLE DESTINATION .
+    RUNTIME DESTINATION .
 )
 
 install(DIRECTORY 

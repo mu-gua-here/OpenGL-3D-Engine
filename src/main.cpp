@@ -62,7 +62,6 @@
 #include <vector>
 #include <unordered_set>
 #include <memory>
-#define _USE_MATH_DEFINES
 #include <cmath>
 #include <cstdio>
 
@@ -2785,10 +2784,9 @@ int main() {
         glEndQuery(GL_TIME_ELAPSED);
 
         queryIndex = 1 - queryIndex;
+        prevIndex = 1 - queryIndex;
 
         glfwPollEvents();
-
-        prevIndex = 1 - queryIndex;        
 
         // ============================================================================
         // UI & WINDOW CONTROL
