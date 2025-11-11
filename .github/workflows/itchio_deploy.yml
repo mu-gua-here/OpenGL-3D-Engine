@@ -21,31 +21,29 @@ jobs:
           set -euo pipefail
           mkdir -p dist/linux
 
-          # If this repo uses CMake, configure and build a Release binary.
-          if [ -f CMakeLists.txt ]; then
-            cmake -S . -B build_linux -DCMAKE_BUILD_TYPE=Release
-            cmake --build build_linux -- -j$(nproc)
-          fi
+          # Configure and build with CMake
+          cmake -S . -B build_linux -DCMAKE_BUILD_TYPE=Release
+          cmake --build build_linux -- -j$(nproc)
 
-          # Try to find the binary in common places (handles build/bin, Release, nested paths and spaces)
-          BIN=$(find build_linux build -type f -name 'OpenGL-3D-Engine' -perm /111 2>/dev/null | head -n1 || true)
+          # Find the binary (search in common CMake output locations)
+          BIN=$(find build_linux/bin -type f -name 'OpenGL-3D-Engine' -perm /111 2>/dev/null | head -n1 || true)
           if [ -z "$BIN" ]; then
-            BIN=$(find . -type f -path '*/Release/OpenGL-3D-Engine*' -perm /111 2>/dev/null | head -n1 || true)
-          fi
-          if [ -z "$BIN" ]; then
-            # search workspace to catch nested directories or unusual layouts (quotes handle spaces)
-            BIN=$(find "$GITHUB_WORKSPACE" -type f -name 'OpenGL-3D-Engine' -perm /111 2>/dev/null | head -n1 || true)
+            BIN=$(find build_linux -type f -name 'OpenGL-3D-Engine' -perm /111 2>/dev/null | head -n1 || true)
           fi
 
           if [ -z "$BIN" ]; then
             echo "ERROR: Could not find built binary 'OpenGL-3D-Engine'." >&2
-            echo "Searched: build_linux/, build/, */Release/, and the repository workspace." >&2
+            echo "Build directory contents:"
+            find build_linux -type f -perm /111 || true
             exit 1
           fi
 
           echo "Found binary at: $BIN"
           cp "$BIN" dist/linux/
-          cp -r assets shaders dist/linux/
+          
+          # Copy asset folders (scene_models and skyboxes)
+          cp -r scene_models dist/linux/
+          cp -r skyboxes dist/linux/
           
       - name: Push to itch.io (Linux)
         uses: manleydev/butler-publish-itchio-action@v1.0.3
@@ -65,14 +63,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
             
-      - name: Build (Windows) - optional
+      - name: Build (Windows)
         shell: pwsh
         run: |
-          # If you use CMake on Windows, build the Release configuration
-          if (Test-Path CMakeLists.txt) {
-            cmake -S . -B build_windows -G "Visual Studio 17 2022" -A x64 -DCMAKE_BUILD_TYPE=Release
-            cmake --build build_windows --config Release
-          }
+          # Build with CMake for Windows
+          cmake -S . -B build_windows -G "Visual Studio 17 2022" -A x64
+          cmake --build build_windows --config Release
 
       - name: Package Windows Build
         shell: bash
@@ -80,22 +76,25 @@ jobs:
           set -euo pipefail
           mkdir -p dist/windows
 
-          EXE=$(find build_windows -type f -name 'OpenGL-3D-Engine.exe' 2>/dev/null | head -n1 || true)
+          # Search for the .exe in Release build output
+          EXE=$(find build_windows/bin/Release -type f -name 'OpenGL-3D-Engine.exe' 2>/dev/null | head -n1 || true)
           if [ -z "$EXE" ]; then
-            EXE=$(find . -type f -path '*/Release/OpenGL-3D-Engine.exe' 2>/dev/null | head -n1 || true)
-          fi
-          if [ -z "$EXE" ]; then
-            EXE=$(find "$GITHUB_WORKSPACE" -type f -name 'OpenGL-3D-Engine.exe' 2>/dev/null | head -n1 || true)
+            EXE=$(find build_windows -type f -name 'OpenGL-3D-Engine.exe' 2>/dev/null | head -n1 || true)
           fi
 
           if [ -z "$EXE" ]; then
             echo "ERROR: Could not find OpenGL-3D-Engine.exe" >&2
+            echo "Build directory contents:"
+            find build_windows -type f -name "*.exe" || true
             exit 1
           fi
 
           echo "Found exe at: $EXE"
           cp "$EXE" dist/windows/
-          cp -r assets shaders dist/windows/
+          
+          # Copy asset folders
+          cp -r scene_models dist/windows/
+          cp -r skyboxes dist/windows/
           
       - name: Push to itch.io (Windows)
         uses: manleydev/butler-publish-itchio-action@v1.0.3
@@ -117,26 +116,45 @@ jobs:
       
       - name: Configure and Build (macOS)
         run: |
-          cmake -B build_macos -G Xcode -DCMAKE_BUILD_TYPE=Release .
+          cmake -S . -B build_macos
           cmake --build build_macos --config Release
         
       - name: Package macOS Build
         run: |
+          set -euo pipefail
           mkdir -p dist/macos
-          BIN=$(find build_macos -type f -name 'OpenGL-3D-Engine' 2>/dev/null | head -n1 || true)
+          
+          # Find the macOS binary
+          BIN=$(find build_macos/bin/Release -type f -name 'OpenGL-3D-Engine' 2>/dev/null | head -n1 || true)
           if [ -z "$BIN" ]; then
-            BIN=$(find . -type f -path '*/Release/OpenGL-3D-Engine*' 2>/dev/null | head -n1 || true)
+            BIN=$(find build_macos -type f -name 'OpenGL-3D-Engine' 2>/dev/null | head -n1 || true)
           fi
+          
           if [ -z "$BIN" ]; then
             echo "ERROR: Could not find macOS binary" >&2
+            echo "Build directory contents:"
+            find build_macos -type f -perm +111 || true
             exit 1
           fi
+          
+          echo "Found binary at: $BIN"
           cp "$BIN" dist/macos/
-          cp -r assets shaders dist/macos/
+          
+          # Copy asset folders
+          cp -r scene_models dist/macos/
+          cp -r skyboxes dist/macos/
+
+          cd dist/macos
+          zip -r ../opengl-3d-engine-macos.zip .
           
       - name: Push to itch.io (macOS)
-        run: |
-          butler push dist/macos mu-gua-here/opengl-3d-engine-demo:osx \
-            --userversion ${{ github.ref_name }}-${{ github.sha }}
+        uses: manleydev/butler-publish-itchio-action@v1.0.3
         env:
-          BUTLER_API_KEY: ${{ secrets.BUTLER_API_KEY }}
+          BUTLER_CREDENTIALS: ${{ secrets.BUTLER_API_KEY }}
+          ITCH_USER: mu-gua-here
+          ITCH_GAME: opengl-3d-engine-demo
+          # Point the PACKAGE variable to the newly created zip file
+          PACKAGE: dist/opengl-3d-engine-macos.zip
+          # Use "macos" channel name for consistency
+          CHANNEL: macos 
+          VERSION: ${{ github.ref_name }}-${{ github.sha }}

@@ -2,37 +2,39 @@
 //  main.cpp
 //  OpenGL 3D Engine
 //
-//  Created by Ray on 2025/9/15.
+//  Created by mu-gua-here on 2025/9/15.
 //
 
 /*
  
  CC ATTRIBUTION
  3D MODELS:
- Realistic tree model: "Tree02" (https://free3d.com/3d-model/tree02-35663.html) by rezashams313 is licensed under Personal Use License.
+ Realistic tree model: "Tree02" (https://free3d.com/3d-model/tree02-35663.html) by rezashams313 is licensed under Creative Commons Attribution-NonCommercial (http://creativecommons.org/licenses/by-nc/4.0/).
  Road track model: "Road Modular" (https://skfb.ly/pxYZw) by golukumar is licensed under Creative Commons Attribution (http://creativecommons.org/licenses/by/4.0/).
-
+ Residential buildings model: "Low Poly Residential Buildings Pack" (https://free3d.com/3d-model/array-house-example-3033.html) by 3dhaupt is licensed under Creative Commons Attribution-NonCommercial (http://creativecommons.org/licenses/by-nc/4.0/).
+ Lamppost model: "Street Lantern" (https://skfb.ly/oMIXI) by Samuel F. Johanns (Oneironauticus) is licensed under Creative Commons Attribution (http://creativecommons.org/licenses/by/4.0/). 
+ 
  TEXTURES:
- Checkered grass texture designed by Freepik
- 
- SPECIAL NOTES
- 1. Tree model is personal use license only - non-commerical
- 
+ Checkered grass texture: "Green grass field pattern background for soccer and football. | Premium Photo" (https://ar.pinterest.com/pin/797629784037209282/) by Freepik is licensed under Creative Commons Attribution (http://creativecommons.org/licenses/by/4.0/).
+
  IMPLEMENTATION LIST
- 1. Add collision detection
- 2. Physics (maybe)
- 3. Optimizations
+ 1. Physics (maybe)
+ 2. Optimizations
     a. Batching
     b. Instancing
     c. Frustum culling
     d. LOD
- 4. Complete PBR implementation (esp. IBL)
- 5. Make better UI for debugging
+ 3. Complete PBR implementation (esp. IBL)
+ 4. Increase view distance for shadows
  
- BUGS LIST
- 1. Fix broken POM
- 2. Fix ImGui window mouse interaction
- 
+ BUGS & IMPROVEMENTS LIST
+ 1. Fix ImGui window mouse interaction
+ 2. Height map still not working - when height scale increases texture warps instead of increasing in depth
+ 3. Fix lamppost mesh
+
+ NOTES FOR OTHER DEVELOPERS
+ 1. If you try to export the textures here elsewhere it might look strange because I'd flipped the textures for them to work in OpenGL
+
  */
 
 // OpenGL-related
@@ -79,6 +81,26 @@
 #include <glm/gtx/string_cast.hpp>
 #include <glm/gtx/euler_angles.hpp>
 
+// Platform-specific includes for executable path
+#ifdef _WIN32
+    #include <windows.h>
+    #ifndef MAX_PATH
+        #define MAX_PATH 260
+    #endif
+#elif __linux__
+    #include <unistd.h>
+    #include <linux/limits.h>
+    #ifndef PATH_MAX
+        #define PATH_MAX 4096
+    #endif
+#elif __APPLE__
+    // mach-o/dyld.h already included
+    #include <limits.h>
+    #ifndef PATH_MAX
+        #define PATH_MAX 4096
+    #endif
+#endif
+
 // Function prototypes
 void mouse_callback(GLFWwindow* window, double xpos, double ypos);
 void framebuffer_size_callback(GLFWwindow* window, int width, int height);
@@ -100,10 +122,24 @@ bool paused = false;
 float update_count = 0;
 float frame_time = 1.0f;
 float tick_speed = 1.0f;
+bool fullscreen = false;
+
+// Performance queries
+GLuint shadowQueries[2] = {0, 0};
+GLuint mainQueries[2] = {0, 0};
+GLuint skyboxQueries[2] = {0, 0};
+int queryIndex = 0;
+int prevIndex = 0;
+double shadowTime = 0.0;
+double mainTime = 0.0;
+double skyboxTime = 0.0;
+
+// Player/camera
+float cam_speed_multiplier = 0.005f;
+glm::vec3 global_camera_vel = {0, 0, 0};
+float friction = 0.9f;
 glm::mat4 view;
 glm::mat4 projection;
-bool fullscreen = false;
-float cam_speed_multiplier = 0.05f;
 
 // Scene stats
 unsigned int total_triangles = 0;
@@ -127,6 +163,10 @@ GLuint default_texture_id = 0;
 
 const glm::vec3 VEC3_NO_CHANGE = glm::vec3(NAN, NAN, NAN);
 
+// ============================================================================
+// FPS COUNTER
+// ============================================================================
+
 void updateFPS(GLFWwindow* window) {
     static double lastTime = glfwGetTime();
     static unsigned int frameCount = 0;
@@ -141,12 +181,26 @@ void updateFPS(GLFWwindow* window) {
     fpsTimer += frame_time;
     
     if (fpsTimer >= 1.0) {
+        // Update fps counter
         fps = frameCount / fpsTimer;
         char title[256];
         snprintf(title, sizeof(title), "OpenGL 3D Engine by @mu-gua-here");
         glfwSetWindowTitle(window, title);
         frameCount = 0;
         fpsTimer = 0.0;
+
+        // Update performance query results
+        GLuint64 shadowTimeNS = 0;
+        glGetQueryObjectui64v(shadowQueries[prevIndex], GL_QUERY_RESULT, &shadowTimeNS);
+        shadowTime = shadowTimeNS / 1000000.0;
+
+        GLuint64 skyboxTimeNS = 0;
+        glGetQueryObjectui64v(skyboxQueries[prevIndex], GL_QUERY_RESULT, &skyboxTimeNS);
+        skyboxTime = skyboxTimeNS / 1000000.0;
+
+        GLuint64 mainTimeNS = 0;
+        glGetQueryObjectui64v(mainQueries[prevIndex], GL_QUERY_RESULT, &mainTimeNS);
+        mainTime = mainTimeNS / 1000000.0;
     }
 }
 
@@ -154,14 +208,86 @@ void updateFPS(GLFWwindow* window) {
 // ASSET PATH BUILDING
 // ============================================================================
 
+std::filesystem::path getExecutableDirectory() {
+    std::filesystem::path execPath;
+    
+#ifdef _WIN32
+    // Windows
+    char buffer[MAX_PATH];
+    GetModuleFileNameA(NULL, buffer, MAX_PATH);
+    execPath = std::filesystem::path(buffer).parent_path();
+    
+#elif __APPLE__
+    // macOS
+    char buffer[PATH_MAX];
+    uint32_t size = sizeof(buffer);
+    if (_NSGetExecutablePath(buffer, &size) == 0) {
+        execPath = std::filesystem::path(buffer).parent_path();
+    } else {
+        printf("Warning: Buffer too small for executable path\n");
+        execPath = std::filesystem::current_path();
+    }
+    
+#elif __linux__
+    // Linux
+    char buffer[PATH_MAX];
+    ssize_t len = readlink("/proc/self/exe", buffer, sizeof(buffer) - 1);
+    if (len != -1) {
+        buffer[len] = '\0';
+        execPath = std::filesystem::path(buffer).parent_path();
+    } else {
+        printf("Warning: Could not read executable path\n");
+        execPath = std::filesystem::current_path();
+    }
+    
+#else
+    // Fallback for unknown platforms
+    execPath = std::filesystem::current_path();
+#endif
+    
+    printf("Executable directory: %s\n", execPath.string().c_str());
+    return execPath;
+}
+
 std::string getExecutablePath() {
-    executable_path = std::filesystem::current_path();
-    printf("Working directory: %s\n", executable_path.string().c_str());
+    executable_path = getExecutableDirectory();
+    
+    // Check if we're in a development environment (has CMakeLists.txt in parent dirs)
+    std::filesystem::path searchPath = executable_path;
+    bool isDevEnvironment = false;
+    
+    // Search up to 5 levels up for CMakeLists.txt (development indicator)
+    for (int i = 0; i < 5; i++) {
+        if (std::filesystem::exists(searchPath / "CMakeLists.txt")) {
+            isDevEnvironment = true;
+            executable_path = searchPath; // Use project root
+            printf("Development environment detected, using project root: %s\n", searchPath.string().c_str());
+            break;
+        }
+        if (searchPath.has_parent_path()) {
+            searchPath = searchPath.parent_path();
+        } else {
+            break;
+        }
+    }
+    
+    if (!isDevEnvironment) {
+        printf("Deployed environment detected, using executable directory\n");
+    }
+    
+    printf("Asset base path: %s\n", executable_path.string().c_str());
     return executable_path.string();
 }
 
 std::string buildAssetPath(const std::string& relative_path) {
-    return executable_path.string() + "/" + relative_path;
+    std::filesystem::path fullPath = executable_path / relative_path;
+    
+    // Verify the path exists
+    if (!std::filesystem::exists(fullPath)) {
+        printf("Warning: Asset path does not exist: %s\n", fullPath.string().c_str());
+    }
+    
+    return fullPath.string();
 }
 
 std::string resolveTexturePath(const std::string& modelPath, const std::string& textureName) {
@@ -193,36 +319,41 @@ class Material {
 public:
     std::string name;
     
-    // Initialise PBR properties
+    // PBR properties with proper defaults
     glm::vec3 base_color{1.0f, 1.0f, 1.0f};
-    float metallic = 1.0f;
+    float metallic = 0.0f;
     float roughness = 0.5f;
+    float ao = 1.0f;
     glm::vec3 emissive{0.0f, 0.0f, 0.0f};
     
-    GLuint albedo_map = 0;      // Base color texture
-    GLuint normal_map = 0;      // Normal/bump map
-    GLuint orm_map = 0;         // AO, roughnesss, metallic and height maps
-    GLuint height_map = 0;      // Optimisation for height map
-    GLuint emissive_map = 0;    // Self-illumination
+    GLuint albedo_map = 0;
+    GLuint normal_map = 0;
+    GLuint orm_map = 0; // AO, roughness, metallic and height packed
+    GLuint height_map = 0;
+    GLuint emissive_map = 0;
+    GLuint specular_map = 0;
     
     float height_scale = 0.01f;
     
     Material() = default;
     Material(const std::string& name) : name(name) {}
     
-    // Check if a specific map is present
     bool hasAlbedoMap() const { return albedo_map != 0; }
     bool hasNormalMap() const { return normal_map != 0; }
     bool hasORMMap() const { return orm_map != 0; }
     bool hasEmissiveMap() const { return emissive_map != 0; }
     bool hasHeightMap() const { return height_map != 0; }
+    bool hasSpecularMap() const { return specular_map != 0; }
 };
 
 Material createDefaultMaterial() {
     Material default_mat;
     default_mat.name = "default";
-    default_mat.albedo_map = default_texture_id;  // PBR fallback
+    default_mat.albedo_map = default_texture_id;
     default_mat.base_color = {1.0f, 1.0f, 1.0f};
+    default_mat.metallic = 0.0f;
+    default_mat.roughness = 0.5f;
+    default_mat.ao = 1.0f;
     return default_mat;
 }
 
@@ -238,7 +369,7 @@ GLuint createDefaultTexture() {
     const unsigned char white_pixel[4] = {255, 255, 255, 255};
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 1, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, white_pixel);
     
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     
     glBindTexture(GL_TEXTURE_2D, 0);
@@ -379,7 +510,7 @@ GLuint loadCubemap(const char* faces[6]) {
     }
     
     glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
-    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
@@ -400,10 +531,18 @@ void initShadowMap() {
     glGenTextures(1, &shadowMapTexture);
     glBindTexture(GL_TEXTURE_2D, shadowMapTexture);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT, SHADOW_WIDTH, SHADOW_HEIGHT, 0, GL_DEPTH_COMPONENT, GL_FLOAT, NULL);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+
+    // GL_LINEAR for better filtering
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
+
+    // Proper shadow comparison
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, GL_COMPARE_REF_TO_TEXTURE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_COMPARE_FUNC, GL_LEQUAL);
+
     float borderColor[] = { 1.0f, 1.0f, 1.0f, 1.0f };
     glTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, borderColor);
     
@@ -1004,14 +1143,15 @@ out vec4 FragColor;
 // Samplers
 uniform sampler2D albedoMap;
 uniform sampler2D normalMap;
-uniform sampler2D ormMap; // R = AO  G = Roughness  B = Metallic  A = Height
+uniform sampler2D ormMap;
 uniform sampler2D emissiveMap;
-uniform sampler2D shadowMap;
+uniform sampler2DShadow shadowMap;
 
-// Materials
+// Material scalar properties
 uniform vec3 baseColor;
 uniform float metallic;
 uniform float roughness;
+uniform float ao;
 uniform vec3 emissive;
 uniform float heightScale;
 
@@ -1026,6 +1166,7 @@ uniform bool hasHeightMap;
 uniform int lightCount;
 uniform vec3 viewPos;
 uniform int shadowLightIndex;
+uniform mat4 lightSpaceMatrix;
 
 uniform vec3 lightPositions[MAX_LIGHTS];
 uniform vec3 lightColors[MAX_LIGHTS];
@@ -1037,41 +1178,30 @@ uniform float lightTypes[MAX_LIGHTS];
 
 const float PI = 3.14159265359;
 
-// PARALLAX OCCLUSION MAPPING (POM)
+// PARALLAX OCCLUSION MAPPING
 vec2 parallaxMapping(vec2 texCoords, vec3 viewDir) { 
-    // Number of depth layers
-    const float minLayers = 8;
-    const float maxLayers = 32;
+    const float minLayers = 8.0;
+    const float maxLayers = 32.0;
     float numLayers = mix(maxLayers, minLayers, abs(dot(vec3(0.0, 0.0, 1.0), viewDir)));  
-    // Calculate the size of each layer
     float layerDepth = 1.0 / numLayers;
-    // Depth of current layer
     float currentLayerDepth = 0.0;
-    // the amount to shift the texture coordinates per layer (from vector P)
-    vec2 P = viewDir.xy / viewDir.z * heightScale; 
+    
+    vec2 P = viewDir.xy / viewDir.z * heightScale;
     vec2 deltaTexCoords = P / numLayers;
   
-    // Get initial values
     vec2 currentTexCoords = texCoords;
     float currentDepthMapValue = texture(ormMap, currentTexCoords).a;
       
     while (currentLayerDepth < currentDepthMapValue) {
-        // Shift texture coordinates along direction of P
         currentTexCoords -= deltaTexCoords;
-        // Depthmap value at current texture coordinates
         currentDepthMapValue = texture(ormMap, currentTexCoords).a;  
-        // Next layer depth
         currentLayerDepth += layerDepth;  
     }
     
-    // Texture coordinates before collision (reverse operations)
     vec2 prevTexCoords = currentTexCoords + deltaTexCoords;
-
-    // Depth after and before collision for linear interpolation
-    float afterDepth  = currentDepthMapValue - currentLayerDepth;
+    float afterDepth = currentDepthMapValue - currentLayerDepth;
     float beforeDepth = texture(ormMap, prevTexCoords).a - currentLayerDepth + layerDepth;
  
-    // Interpolation of texture coordinates
     float weight = afterDepth / (afterDepth - beforeDepth);
     vec2 finalTexCoords = prevTexCoords * weight + currentTexCoords * (1.0 - weight);
 
@@ -1079,83 +1209,137 @@ vec2 parallaxMapping(vec2 texCoords, vec3 viewDir) {
 }
 
 // SHADOW MAPPING
-
 float calcShadow(vec4 fragLight, vec3 N, vec3 L) {
     if (shadowLightIndex < 0) return 0.0;
 
-    // Project shadow
-    vec3 proj = fragLight.xyz / fragLight.w;
+    // Apply normal offset before projection to prevent acne
+    vec3 offsetPos = FragPos + N * 0.1;
+    vec4 offsetLight = lightSpaceMatrix * vec4(offsetPos, 1.0);
+    
+    vec3 proj = offsetLight.xyz / offsetLight.w;
     proj = proj * 0.5 + 0.5;
 
     if (proj.z > 1.0) return 0.0;
 
-    // Apply bias to account for self-shadowing acne
-    float bias = max(0.0001 * tan(acos(dot(N, L))), 0.00001);
-    vec3 shadowPos = vec3(fragLight) + L * bias; // Push vertex along normal
-    proj.z = (shadowPos.z / fragLight.w) * 0.5 + 0.5 - bias; // Apply to depth
+    // Minimal bias needed since we use normal offset
+    float cosTheta = max(dot(N, L), 0.0);
+    float bias = 0.0001 * (1.0 - cosTheta);
 
+    // Poisson disk sampling offsets
+    vec2 poissonDisk[16] = vec2[](
+        vec2(-0.94201624, -0.39906216),
+        vec2(0.94558609, -0.76890725),
+        vec2(-0.094184101, -0.92938870),
+        vec2(0.34495938, 0.29387760),
+        vec2(-0.91588581, 0.45771432),
+        vec2(-0.81544232, -0.87912464),
+        vec2(-0.38277543, 0.27676845),
+        vec2(0.97484398, 0.75648379),
+        vec2(0.44323325, -0.97511554),
+        vec2(0.53742981, -0.47373420),
+        vec2(-0.26496911, -0.41893023),
+        vec2(0.79197514, 0.19090188),
+        vec2(-0.24188840, 0.99706507),
+        vec2(-0.81409955, 0.91437590),
+        vec2(0.19984126, 0.78641367),
+        vec2(0.14383161, -0.14100790)
+    );
+
+    // PCF sampling with Poisson disk distribution
     float shadow = 0.0;
-    vec2 texel = 1.0 / textureSize(shadowMap, 0);
-    const int pcfSize = 2;
-    for (int x = -pcfSize; x <= pcfSize; ++x) {
-        for (int y = -pcfSize; y <= pcfSize; ++y) {
-            shadow += texture(shadowMap, proj.xy + vec2(x,y) * texel).r < proj.z ? 1.0 : 0.0;
-        }
+    vec2 texelSize = 1.0 / vec2(textureSize(shadowMap, 0));
+    
+    // Adjust the multiplier to control shadow softness (higher = softer)
+    float spread = 2.0;
+    
+    for (int i = 0; i < 16; ++i) {
+        vec2 offset = poissonDisk[i] * texelSize * spread;
+        float shadowSample = texture(shadowMap, vec3(proj.xy + offset, proj.z - bias));
+        shadow += shadowSample; // Returns 0.0 (in shadow) or 1.0 (lit)
     }
-    shadow /= (pcfSize * 2 + 1) * (pcfSize * 2 + 1);
+    shadow /= 16.0;
 
-    // Soft border fade
+    // Fade shadows at edges
     vec2 border = min(proj.xy, 1.0 - proj.xy);
-    float fade  = smoothstep(0.0, 0.1, min(border.x, border.y));
-    return mix(0.0, shadow, fade);
+    float fade = smoothstep(0.0, 0.1, min(border.x, border.y));
+    
+    // Invert because sampler2DShadow returns 1.0 for lit, 0.0 for shadow
+    return mix(0.0, 1.0 - shadow, fade);
 }
 
-// BRDF PBR
+// PBR FUNCTIONS
 vec3 fresnelSchlick(float cosTheta, vec3 F0) {
     return F0 + (1.0 - F0) * pow(clamp(1.0 - cosTheta, 0.0, 1.0), 5.0);
 }
 
-float D_GGX(vec3 N, vec3 H, float a2) {
+float D_GGX(vec3 N, vec3 H, float roughness) {
+    float a = roughness * roughness;
+    float a2 = a * a;
     float NdotH = max(dot(N, H), 0.0);
-    float denom = NdotH*NdotH * (a2 - 1.0) + 1.0;
-    return a2 / (PI * denom * denom);
+    float NdotH2 = NdotH * NdotH;
+    
+    float denom = NdotH2 * (a2 - 1.0) + 1.0;
+    denom = PI * denom * denom;
+    
+    return a2 / max(denom, 0.0001);
 }
 
-float G_Schlick(float NdotV, float k) {
-    return NdotV / (NdotV * (1.0 - k) + k);
+float G_SchlickGGX(float NdotV, float roughness) {
+    float r = roughness + 1.0;
+    float k = (r * r) / 8.0;
+    
+    float denom = NdotV * (1.0 - k) + k;
+    
+    return NdotV / max(denom, 0.0001);
 }
 
-float G_Smith(vec3 N, vec3 V, vec3 L, float rough) {
-    float k = (rough + 1.0) * (rough + 1.0) / 8.0;
-    return G_Schlick(max(dot(N, L), 0.0), k) * G_Schlick(max(dot(N, V), 0.0), k);
+float G_Smith(vec3 N, vec3 V, vec3 L, float roughness) {
+    float NdotV = max(dot(N, V), 0.0);
+    float NdotL = max(dot(N, L), 0.0);
+    float ggx2 = G_SchlickGGX(NdotV, roughness);
+    float ggx1 = G_SchlickGGX(NdotL, roughness);
+    
+    return ggx1 * ggx2;
 }
 
-// MAIN LOOP
+// MAIN
 void main() {
-    // Tangent-space POM
+    // Calculate view direction in tangent space for POM
     vec3 Vworld = normalize(viewPos - FragPos);
-    vec2 uv;
+    vec2 uv = TexCoord;
+    
     if (hasHeightMap) {
         vec3 Vts = normalize(transpose(TBN) * Vworld);
-        // Prevent division by zero
         if (abs(Vts.z) < 0.001) Vts.z = 0.001;
         uv = parallaxMapping(TexCoord, Vts);
-    } else {
-        uv = TexCoord;
     }
     
-    // Sample PBR maps
-    vec4 albedoS = hasAlbedoMap ? texture(albedoMap, uv) : vec4(baseColor, 1.0);
-    if (albedoS.a < 0.5) discard;
-
-    vec3 albedo = albedoS.rgb;
-    vec4 orm = hasORMMap ? texture(ormMap, uv) : vec4(1.0, roughness, metallic, 0.5);
-    float ao = orm.r;
-    float rough = orm.g;
-    float metal = orm.b;
-
+    // Sample material properties
+    vec4 albedoSample = hasAlbedoMap ? texture(albedoMap, uv) : vec4(baseColor, 1.0);
+    if (albedoSample.a < 0.5) discard;
+    
+    vec3 albedo = albedoSample.rgb;
+    
+    // Sample or use scalar values for ORM
+    float aoValue = ao;
+    float roughValue = roughness;
+    float metalValue = metallic;
+    
+    if (hasORMMap) {
+        vec3 ormSample = texture(ormMap, uv).rgb;
+        aoValue = ormSample.r;
+        roughValue = ormSample.g;
+        metalValue = ormSample.b;
+    }
+    
+    // Clamp values to valid ranges
+    roughValue = clamp(roughValue, 0.04, 1.0);  // Minimum roughness to avoid artifacts
+    metalValue = clamp(metalValue, 0.0, 1.0);
+    aoValue = clamp(aoValue, 0.0, 1.0);
+    
     vec3 emissiveCol = hasEmissiveMap ? texture(emissiveMap, uv).rgb : emissive;
-
+    
+    // Calculate normal
     vec3 N = normalize(Normal);
     if (hasNormalMap) {
         vec3 nt = texture(normalMap, uv).rgb * 2.0 - 1.0;
@@ -1164,61 +1348,72 @@ void main() {
     
     // Flip normal if facing away
     if (!gl_FrontFacing) N = -N;
-
+    
     vec3 V = normalize(Vworld);
-    vec3 F0 = mix(vec3(0.04), albedo, metal);
+    
+    // Calculate F0 (base reflectivity)
+    vec3 F0 = vec3(0.04);
+    F0 = mix(F0, albedo, metalValue);
+    
+    // Lighting calculation
     vec3 Lo = vec3(0.0);
-
+    
     for (int i = 0; i < lightCount && i < MAX_LIGHTS; ++i) {
-        // Calculate vector based on whether light is directional or not
         vec3 L;
-        vec3 H;
-        float att;
-        if (lightTypes[i] == 0) {
-            L = -lightDirections[i];
-            H = normalize(V + L);
-            att = 1.0f;
+        float attenuation = 1.0;
+        
+        // Calculate light direction and attenuation
+        if (lightTypes[i] == 0.0) {
+            // Directional light
+            L = normalize(-lightDirections[i]);
         } else {
+            // Point or spot light
             L = normalize(lightPositions[i] - FragPos);
-            H = normalize(V + L);
-            float dist = length(lightPositions[i] - FragPos);
-            att = 1.0 / (dist * dist);
+            float distance = length(lightPositions[i] - FragPos);
+            attenuation = 1.0 / (distance * distance);
+            
+            // Spotlight attenuation
+            if (lightTypes[i] == 2.0) {
+                float theta = dot(L, normalize(-lightDirections[i]));
+                float epsilon = lightInnerCutoffs[i] - lightOuterCutoffs[i];
+                float intensity = clamp((theta - lightOuterCutoffs[i]) / epsilon, 0.0, 1.0);
+                attenuation *= intensity;
+            }
         }
-        vec3 radiance = lightColors[i] * lightIntensities[i] * att;
-
-        // Spotlight attenuation
-        if (lightTypes[i] != 0) {
-            float theta = dot(-L, lightDirections[i]);
-            float eps = lightInnerCutoffs[i] - lightOuterCutoffs[i];
-            float spot = clamp((theta - lightOuterCutoffs[i]) / eps, 0.0, 1.0);
-            radiance *= spot;
-        }
-
-        // Cook-Torrance
-        float NDF = D_GGX(N, H, rough * rough);
-        float G = G_Smith(N, V, L, rough);
+        
+        vec3 H = normalize(V + L);
+        vec3 radiance = lightColors[i] * lightIntensities[i] * attenuation;
+        
+        // Cook-Torrance BRDF
+        float NDF = D_GGX(N, H, roughValue);
+        float G = G_Smith(N, V, L, roughValue);
         vec3 F = fresnelSchlick(max(dot(H, V), 0.0), F0);
-
+        
         vec3 kS = F;
         vec3 kD = vec3(1.0) - kS;
-        kD *= 1.0 - metal;
-
+        kD *= 1.0 - metalValue;
+        
         vec3 numerator = NDF * G * F;
-        float denom = 4.0 * max(dot(N, V), 0.0) * max(dot(N, L), 0.0) + 0.0001;
-        vec3 specular = numerator / denom;
-
+        float denominator = 4.0 * max(dot(N, V), 0.0) * max(dot(N, L), 0.0) + 0.0001;
+        vec3 specular = numerator / denominator;
+        
+        // Shadow calculation
         float shadow = (i == shadowLightIndex) ? calcShadow(FragPosLightSpace, N, L) : 0.0;
+        
         float NdotL = max(dot(N, L), 0.0);
         Lo += (kD * albedo / PI + specular) * radiance * NdotL * (1.0 - shadow);
     }
-
-    vec3 ambient = vec3(0.03) * albedo * ao;
+    
+    // Ambient lighting with AO
+    vec3 ambient = vec3(0.3) * albedo * aoValue;
     vec3 color = ambient + Lo + emissiveCol;
-
-    // Tonemap & gamma correction
+    
+    // Tone mapping (Reinhard)
     color = color / (color + vec3(1.0));
-    color = pow(color, vec3(1.0/2.2));
-
+    
+    // Gamma correction
+    color = pow(color, vec3(1.0 / 2.2));
+    
     FragColor = vec4(color, 1.0);
 }
 )";
@@ -1471,6 +1666,7 @@ public:
         glClear(GL_DEPTH_BUFFER_BIT);
         
         glm::mat4 lightProjection;
+        glm::mat4 lightView;
         
         if (light.type == SPOT_LIGHT) {
             // Move along the light's actual direction vector
@@ -1480,12 +1676,10 @@ public:
             // Choose up vector dynamically based on the calculated light direction
             glm::vec3 up = glm::abs(finalDir.y) > 0.99f ? glm::vec3(0, 0, 1) : glm::vec3(0, 1, 0);
             
-            glm::mat4 lightView = glm::lookAt(light.position, lightTarget, up);
+            lightView = glm::lookAt(light.position, lightTarget, up);
             float outerAngle = glm::degrees(glm::acos(light.outer_cutoff_cos));
             lightProjection = glm::perspective(glm::radians(outerAngle * 2.0f), 1.0f, 0.5f, 100.0f);
-            
-            lightSpaceMatrix = lightProjection * lightView;
-            
+                        
         } else if (light.type == POINT_LIGHT) {
             // Omni-directional point light
             glm::vec3 finalDir = glm::normalize(light.position - glm::vec3(0));
@@ -1493,46 +1687,67 @@ public:
             glm::vec3 up = glm::abs(finalDir.y) > 0.99f ? glm::vec3(0, 0, 1) : glm::vec3(0, 1, 0);
             
             lightProjection = glm::perspective(glm::radians(90.0f), 1.0f, 0.5f, 100.0f);
-            glm::mat4 lightView = glm::lookAt(light.position, glm::vec3(0), up);
-            
-            lightSpaceMatrix = lightProjection * lightView;
-            
+            lightView = glm::lookAt(light.position, glm::vec3(0), up);
+                        
         } else if (light.type == DIR_LIGHT) {
-            // Directional light
-            glm::vec3 finalDir = glm::normalize(light.direction); // light shines in –L
+            glm::vec3 finalDir = glm::normalize(light.direction);
             glm::vec3 up = std::abs(finalDir.y) > 0.999f ? glm::vec3(0, 0, 1) : glm::vec3(0, 1, 0);
-            glm::mat4 lightView = glm::lookAt(global_camera.position - finalDir * 300.0f * 0.5f, global_camera.position, up);
-            glm::mat4 lightProjection = glm::ortho(-50.0f, 50.0f, -50.0f, 50.0f, 0.1f, 300.0f);
             
-            lightSpaceMatrix = lightProjection * lightView;
+            // Center shadow map on camera position (follow camera)
+            glm::vec3 shadowCenter = global_camera.position;
+            
+            // Calculate light view matrix
+            lightView = glm::lookAt(shadowCenter - finalDir * 150.0f, shadowCenter, up);
+            
+            // Orthographic bounds
+            float orthoSize = 50.0f;
+            lightProjection = glm::ortho(-orthoSize, orthoSize, -orthoSize, orthoSize, 0.1f, 300.0f);
+            
+            glm::mat4 shadowMatrix = lightProjection * lightView;
+            
+            // Transform shadow center to light space
+            glm::vec4 shadowOrigin = shadowMatrix * glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
+            shadowOrigin = shadowOrigin / shadowOrigin.w;
+            shadowOrigin = shadowOrigin * float(SHADOW_WIDTH) / 2.0f;
+            
+            // Round to nearest texel
+            glm::vec4 roundedOrigin = glm::round(shadowOrigin);
+            glm::vec4 roundOffset = roundedOrigin - shadowOrigin;
+            roundOffset = roundOffset * 2.0f / float(SHADOW_WIDTH);
+            roundOffset.z = 0.0f;
+            roundOffset.w = 0.0f;
+            
+            // Adjust projection matrix to snap to texels
+            lightProjection[3] += roundOffset;
         }
         
+        lightSpaceMatrix = lightProjection * lightView;
+
         shadow_shader->use();
         shadow_shader->setMat4("lightSpaceMatrix", lightSpaceMatrix);
-        
+
         // Render all entities
         for (size_t i = 0; i < entity_manager.size(); i++) {
             Entity* entity = entity_manager.getEntityAt(i);
             if (entity && entity->active) {
                 bool is_light_entity = false;
-                for (const auto& light : lights) {
-                    if (entity->name == light.entity_name) {
+                for (const auto& l : lights) {
+                    if (entity->name == l.entity_name) {
                         is_light_entity = true;
                         break;
                     }
                 }
-                if (is_light_entity) {
-                    continue;  // Skip rendering this entity in shadow pass
-                }
+                if (is_light_entity) continue;
+
                 for (const auto& mesh : entity->meshes) {
                     if (mesh && mesh->isValid()) {
-                        // Apply mesh-specific culling
                         if (mesh->cull_mode == CULL_NONE) {
-                            glDisable(GL_CULL_FACE);  // Disable culling for thin objects
+                            glDisable(GL_CULL_FACE);
                         } else {
                             glEnable(GL_CULL_FACE);
-                            glCullFace(GL_FRONT);     // Keep front-face culling for solid objects
+                            glCullFace(GL_FRONT);
                         }
+
                         glm::mat4 scale_matrix = glm::scale(glm::mat4(1.0f), entity->scale);
                         glm::mat4 rotation_x = glm::rotate(glm::mat4(1.0f), glm::radians(entity->rotation.x), glm::vec3(1.0f, 0.0f, 0.0f));
                         glm::mat4 rotation_y = glm::rotate(glm::mat4(1.0f), glm::radians(entity->rotation.y), glm::vec3(0.0f, 1.0f, 0.0f));
@@ -1540,7 +1755,7 @@ public:
                         glm::mat4 rotation = rotation_z * rotation_y * rotation_x;
                         glm::mat4 translation = glm::translate(glm::mat4(1.0f), entity->position);
                         glm::mat4 model = translation * rotation * scale_matrix;
-                        
+
                         shadow_shader->setMat4("model", model);
                         
                         // Bind texture for shadow shaders to test alpha values in texture
@@ -1555,13 +1770,13 @@ public:
                 }
             }
         }
-        
+
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
         glViewport(viewport[0], viewport[1], viewport[2], viewport[3]);
         glCullFace(GL_BACK);
     }
     
-    void setLightingUniforms() {
+    void setGlobalUniforms(const Camera& camera) {
         std::vector<glm::vec3> positions;
         std::vector<glm::vec3> colors;
         std::vector<float> intensities;
@@ -1591,27 +1806,32 @@ public:
         pbr_shader->setFloatArray("lightInnerCutoffs", inner_cutoffs);
         pbr_shader->setFloatArray("lightOuterCutoffs", outer_cutoffs);
         pbr_shader->setFloatArray("lightTypes", types);
+
+        // Camera uniforms
+        pbr_shader->setMat4("view", view);
+        pbr_shader->setMat4("projection", projection);
+        pbr_shader->setMat4("lightSpaceMatrix", lightSpaceMatrix);
+        pbr_shader->setVec3("viewPos", camera.position);
     }
     
     void drawEntity(Entity* entity, const Camera& camera, int shadowLightIndex) {
         if (!entity->active) return;
-        
         for (const auto& meshPtr : entity->meshes) {
             Mesh* mesh = meshPtr.get();
             drawMesh(entity, mesh, camera, shadowLightIndex);
         }
     }
-    
-    void drawMesh(Entity* entity, Mesh* mesh, const Camera& camera, int shadowLightIndex) {
+
+        void drawMesh(Entity* entity, Mesh* mesh, const Camera& camera, int shadowLightIndex) {
         if (!entity->active || mesh->TRIANGLE_COUNT == 0 || !mesh->isValid()) {
             return;
         }
-        
+
         if (mesh->VAO == 0 || mesh->VBO == 0) {
             printf("Error: Mesh has an invalid VAO (%u) or VBO (%u).\n", mesh->VAO, mesh->VBO);
             return;
         }
-        
+
         // Handle culling
         switch (mesh->cull_mode) {
             case CULL_NONE:
@@ -1626,15 +1846,7 @@ public:
                 glCullFace(GL_FRONT);
                 break;
         }
-        
-        pbr_shader->use();
-        
-        // Camera uniforms
-        pbr_shader->setMat4("view", view);
-        pbr_shader->setMat4("projection", projection);
-        pbr_shader->setMat4("lightSpaceMatrix", lightSpaceMatrix);
-        pbr_shader->setVec3("viewPos", camera.position);
-        
+
         // Calculate matrices
         glm::mat4 scale_matrix = glm::scale(glm::mat4(1.0f), entity->scale);
         glm::mat4 rotation_x = glm::rotate(glm::mat4(1.0f), glm::radians(entity->rotation.x),
@@ -1647,27 +1859,31 @@ public:
         glm::mat4 translation = glm::translate(glm::mat4(1.0f), entity->position);
         glm::mat4 model = translation * rotation * scale_matrix;
         glm::mat3 normal = glm::transpose(glm::inverse(glm::mat3(model)));
-        
+
         // Set mesh uniforms
         pbr_shader->setMat4("model", model);
         pbr_shader->setMat3("normalMatrix", normal);
         pbr_shader->setInt("shadowLightIndex", shadowLightIndex);
-        
-        // Set material properties (fallback values)
+
+        pbr_shader->setMat4("lightSpaceMatrix", lightSpaceMatrix);
+
+        // Set material properties
         pbr_shader->setVec3("baseColor", mesh->material.base_color);
         pbr_shader->setFloat("metallic", mesh->material.metallic);
         pbr_shader->setFloat("roughness", mesh->material.roughness);
+        pbr_shader->setFloat("ao", mesh->material.ao);
         pbr_shader->setVec3("emissive", mesh->material.emissive);
-        
+        pbr_shader->setFloat("heightScale", mesh->material.height_scale);
+
         // Bind textures and set flags
         int texture_unit = 0;
-        
+
         // Albedo map
         glActiveTexture(GL_TEXTURE0 + texture_unit);
         GLuint albedo_to_use = mesh->material.hasAlbedoMap() ? mesh->material.albedo_map : default_texture_id;
         glBindTexture(GL_TEXTURE_2D, albedo_to_use);
         pbr_shader->setInt("albedoMap", texture_unit);
-        pbr_shader->setInt("hasAlbedoMap", mesh->material.hasAlbedoMap());
+        pbr_shader->setInt("hasAlbedoMap", mesh->material.hasAlbedoMap() ? 1 : 0);
         texture_unit++;
         
         // Normal map
@@ -1675,38 +1891,36 @@ public:
         GLuint normal_to_use = mesh->material.hasNormalMap() ? mesh->material.normal_map : default_texture_id;
         glBindTexture(GL_TEXTURE_2D, normal_to_use);
         pbr_shader->setInt("normalMap", texture_unit);
-        pbr_shader->setInt("hasNormalMap", mesh->material.hasNormalMap());
+        pbr_shader->setInt("hasNormalMap", mesh->material.hasNormalMap() ? 1 : 0);
         texture_unit++;
-        
+
         // ORM map
         glActiveTexture(GL_TEXTURE0 + texture_unit);
         GLuint orm_to_use = mesh->material.hasORMMap() ? mesh->material.orm_map : default_texture_id;
         glBindTexture(GL_TEXTURE_2D, orm_to_use);
         pbr_shader->setInt("ormMap", texture_unit);
-        pbr_shader->setInt("hasORMMap", mesh->material.hasORMMap());
-        // Height map
-        pbr_shader->setInt("hasHeightMap", mesh->material.hasHeightMap());
-        pbr_shader->setFloat("heightScale", mesh->material.height_scale);
+        pbr_shader->setInt("hasORMMap", mesh->material.hasORMMap() ? 1 : 0);
+        pbr_shader->setInt("hasHeightMap", mesh->material.hasHeightMap() ? 1 : 0);
         texture_unit++;
-        
+
         // Emissive map
         glActiveTexture(GL_TEXTURE0 + texture_unit);
         GLuint emissive_to_use = mesh->material.hasEmissiveMap() ? mesh->material.emissive_map : default_texture_id;
         glBindTexture(GL_TEXTURE_2D, emissive_to_use);
         pbr_shader->setInt("emissiveMap", texture_unit);
-        pbr_shader->setInt("hasEmissiveMap", mesh->material.hasEmissiveMap());
+        pbr_shader->setInt("hasEmissiveMap", mesh->material.hasEmissiveMap() ? 1 : 0);
         texture_unit++;
-        
+
         // Shadow map
         glActiveTexture(GL_TEXTURE0 + texture_unit);
         glBindTexture(GL_TEXTURE_2D, shadowMapTexture);
         pbr_shader->setInt("shadowMap", texture_unit);
-        
+
         // Draw
         glBindVertexArray(mesh->VAO);
         glDrawElements(GL_TRIANGLES, mesh->INDEX_COUNT, GL_UNSIGNED_INT, 0);
         glBindVertexArray(0);
-        
+
         // Reset to texture unit 0
         glActiveTexture(GL_TEXTURE0);
     }
@@ -1716,7 +1930,7 @@ public:
             return;
         }
         
-        // Disable culling for light spheres to ensure they're always visible
+        // Disable culling for light meshes
         glDisable(GL_CULL_FACE);
         
         unlit_shader->use();
@@ -1759,9 +1973,8 @@ struct Vertex {
     glm::vec3 bitangent;
 };
 
-// Add this new helper function before packORM
 unsigned char* load_greyscale_data(const std::string& path, const aiScene* scene, int& width, int& height) {
-    // Check if it's an embedded texture (starts with '*')
+    // Check if it is an embedded texture
     if (!path.empty() && path[0] == '*') {
         int texIndex = std::atoi(path.c_str() + 1);
         if (texIndex >= 0 && texIndex < (int)scene->mNumTextures) {
@@ -1815,20 +2028,23 @@ ORMResult packORM(const std::string& current_material_name,
                   const std::string& roughness_path, 
                   const std::string& metallic_path, 
                   const std::string& height_path,
+                  const std::string& specular_path,
                   const aiScene* scene) {
     int w_ao, h_ao;
     int w_r, h_r;
     int w_m, h_m;
     int w_h, h_h;
+    int w_s, h_s;
     
-    // Load data for all four maps using the new helper
+    // Load data for all maps
     unsigned char* ao_data = load_greyscale_data(ao_path, scene, w_ao, h_ao);
     unsigned char* roughness_data = load_greyscale_data(roughness_path, scene, w_r, h_r);
     unsigned char* metallic_data = load_greyscale_data(metallic_path, scene, w_m, h_m);
     unsigned char* height_data = load_greyscale_data(height_path, scene, w_h, h_h);
+    unsigned char* specular_data = load_greyscale_data(specular_path, scene, w_s, h_s);
     
     // Must have at least one map to proceed
-    if (!ao_data && !roughness_data && !metallic_data && !height_data) {
+    if (!ao_data && !roughness_data && !metallic_data && !height_data && !specular_data) {
         return { 0, false };
     }
 
@@ -1837,6 +2053,7 @@ ORMResult packORM(const std::string& current_material_name,
     else if (roughness_data) { width = w_r; height = h_r; }
     else if (metallic_data) { width = w_m; height = h_m; }
     else if (height_data) { width = w_h; height = h_h; }
+    else if (specular_data) { width = w_s; height = h_s; }
     
     if (width == 0 || height == 0) return { 0, false };
 
@@ -1854,9 +2071,15 @@ ORMResult packORM(const std::string& current_material_name,
         final_ao = default_channel_data;
     }
     
-    // Set up Roughness channel (default: 1.0 = 255)
+    // Set up Roughness channel
     unsigned char* final_roughness = roughness_data;
-    if (!roughness_data) {
+    if (!roughness_data && specular_data) {
+        // Convert specular to roughness
+        final_roughness = new unsigned char[width * height];
+        for (int i = 0; i < width * height; ++i) {
+            final_roughness[i] = 255 - specular_data[i];
+        }
+    } else if (!roughness_data) {
         memset(default_channel_data, 255, width * height);
         final_roughness = default_channel_data;
     }
@@ -1871,7 +2094,6 @@ ORMResult packORM(const std::string& current_material_name,
     bool hasHeightData = (height_data != nullptr);
     unsigned char* final_height = height_data;
     if (!height_data) {
-        // Grey if no height map
         memset(default_channel_data, 128, width * height);
         final_height = default_channel_data;
     }
@@ -1900,9 +2122,11 @@ ORMResult packORM(const std::string& current_material_name,
 
     // Cleanup
     if (ao_data) stbi_image_free(ao_data);
-    if (roughness_data) stbi_image_free(roughness_data);
+    if (roughness_data && roughness_data != final_roughness) stbi_image_free(roughness_data);
     if (metallic_data) stbi_image_free(metallic_data);
     if (height_data) stbi_image_free(height_data);
+    if (specular_data) stbi_image_free(specular_data);
+    if (!roughness_data && specular_data) delete[] final_roughness;
     delete[] packed_data;
     delete[] default_channel_data;
     
@@ -1914,7 +2138,7 @@ ORMResult packORM(const std::string& current_material_name,
 Material createMaterialFromAssimp(std::string modelPath, aiMaterial* material, const aiScene* scene) {
     Material mat = createDefaultMaterial();
     aiString path, matName;
-    std::string aoPath, roughPath, metalPath, heightPath;
+    std::string aoPath, roughPath, metalPath, heightPath, specularPath;
     std::string name = "unnamed";
 
     if (material->Get(AI_MATKEY_NAME, matName) == AI_SUCCESS)
@@ -1930,113 +2154,175 @@ Material createMaterialFromAssimp(std::string modelPath, aiMaterial* material, c
             return texPath;
         }
         
-        // Otherwise resolve as external file path
-        return buildAssetPath(resolveTexturePath(modelPath, texPath));
+        // For GLTF/GLB files, textures are relative to the model file
+        std::filesystem::path modelDir = std::filesystem::path(modelPath).parent_path();
+        std::filesystem::path fullTexPath = modelDir / texPath;
+        
+        // Build the full asset path
+        return buildAssetPath("scene_models/" + fullTexPath.string());
     };
-
-    // Albedo / Base Color / Diffuse
+    
+    // Try to get base color from texture first
     if (material->GetTexture(aiTextureType_BASE_COLOR, 0, &path) == AI_SUCCESS ||
         material->GetTexture(aiTextureType_DIFFUSE, 0, &path) == AI_SUCCESS) {
         
-        std::string texPath = path.C_Str();
+        std::string texPath = resolveTexPath(path);
         
-        // Check if it's an embedded texture
-        if (texPath[0] == '*') {
+        // Check if it is an embedded texture
+        if (!texPath.empty() && texPath[0] == '*') {
             int texIndex = std::atoi(texPath.c_str() + 1);
             if (texIndex >= 0 && texIndex < (int)scene->mNumTextures) {
                 aiTexture* embeddedTex = scene->mTextures[texIndex];
                 
                 if (embeddedTex->mHeight == 0) {
-                    // Compressed texture (PNG, JPG, etc.)
-                    mat.albedo_map = loadTextureFromMemory((unsigned char*)embeddedTex->pcData, embeddedTex->mWidth
-                    );
+                    // Compressed texture
+                    mat.albedo_map = loadTextureFromMemory((unsigned char*)embeddedTex->pcData, embeddedTex->mWidth);
                 } else {
                     // Uncompressed ARGB data
                     mat.albedo_map = loadTextureFromARGB(embeddedTex->pcData, embeddedTex->mWidth, embeddedTex->mHeight);
                 }
             }
-        } else {
+        } else if (!texPath.empty()) {
             // External texture file
-            mat.albedo_map = loadTexture(buildAssetPath(resolveTexturePath(modelPath, texPath)));
+            mat.albedo_map = loadTexture(texPath);
         }
     }
-
-    // Normal map
+    
+    if (!mat.hasAlbedoMap()) {
+        aiColor3D color;
+        // Try different color keys in order of preference
+        if (material->Get(AI_MATKEY_BASE_COLOR, color) == AI_SUCCESS ||
+            material->Get(AI_MATKEY_COLOR_DIFFUSE, color) == AI_SUCCESS) {
+            mat.base_color = glm::vec3(color.r, color.g, color.b);
+        }
+    }
+    
     if (material->GetTexture(aiTextureType_NORMALS, 0, &path) == AI_SUCCESS ||
         material->GetTexture(aiTextureType_HEIGHT, 0, &path) == AI_SUCCESS) {
         
-        std::string texPath = path.C_Str();
+        std::string texPath = resolveTexPath(path);
         
-        if (texPath[0] == '*') {
+        if (!texPath.empty() && texPath[0] == '*') {
             int texIndex = std::atoi(texPath.c_str() + 1);
             if (texIndex >= 0 && texIndex < (int)scene->mNumTextures) {
                 aiTexture* embeddedTex = scene->mTextures[texIndex];
                 
                 if (embeddedTex->mHeight == 0) {
-                    mat.normal_map = loadTextureFromMemory((unsigned char*)embeddedTex->pcData, embeddedTex->mWidth
-                    );
+                    // Compressed texture
+                    mat.normal_map = loadTextureFromMemory((unsigned char*)embeddedTex->pcData, embeddedTex->mWidth);
                 } else {
+                    // Uncompressed ARGB data
                     mat.normal_map = loadTextureFromARGB(embeddedTex->pcData, embeddedTex->mWidth, embeddedTex->mHeight);
                 }
             }
-        } else {
-            mat.normal_map = loadTexture(buildAssetPath(resolveTexturePath(modelPath, texPath)));
+        } else if (!texPath.empty()) {
+            // External texture file
+            mat.normal_map = loadTexture(texPath);
         }
     }
-
-    // AO map
+    
+    // Check for metallic texture first
+    if (material->GetTexture(aiTextureType_METALNESS, 0, &path) == AI_SUCCESS) {
+        metalPath = resolveTexPath(path);
+    }
+    
+    if (metalPath.empty()) {
+        float metallicValue;
+        if (material->Get(AI_MATKEY_METALLIC_FACTOR, metallicValue) == AI_SUCCESS) {
+            mat.metallic = metallicValue;
+        }
+    }
+    
+    // Check for roughness texture first
+    if (material->GetTexture(aiTextureType_DIFFUSE_ROUGHNESS, 0, &path) == AI_SUCCESS ||
+        material->GetTexture(aiTextureType_SHININESS, 0, &path) == AI_SUCCESS) {
+        roughPath = resolveTexPath(path);
+    }
+    
+    // Check for specular map (can be converted to roughness)
+    if (roughPath.empty() && material->GetTexture(aiTextureType_SPECULAR, 0, &path) == AI_SUCCESS) {
+        specularPath = resolveTexPath(path);
+    }
+    
+    if (roughPath.empty() && specularPath.empty()) {
+        float roughnessValue;
+        float shininessValue;
+        
+        // Try roughness factor first
+        if (material->Get(AI_MATKEY_ROUGHNESS_FACTOR, roughnessValue) == AI_SUCCESS) {
+            mat.roughness = roughnessValue;
+        }
+        // Fall back to shininess (convert to roughness)
+        else if (material->Get(AI_MATKEY_SHININESS, shininessValue) == AI_SUCCESS) {
+            // Convert shininess to roughness
+            // Shininess typically ranges from 0-1000+, normalize and invert
+            mat.roughness = 1.0f - glm::clamp(shininessValue / 1000.0f, 0.0f, 1.0f);
+        }
+    }
+    
+    // Check for AO texture
     if (material->GetTexture(aiTextureType_AMBIENT_OCCLUSION, 0, &path) == AI_SUCCESS ||
         material->GetTexture(aiTextureType_LIGHTMAP, 0, &path) == AI_SUCCESS ||
         material->GetTexture(aiTextureType_AMBIENT, 0, &path) == AI_SUCCESS) {
         aoPath = resolveTexPath(path);
     }
-
-    // Roughness map
-    if (material->GetTexture(aiTextureType_DIFFUSE_ROUGHNESS, 0, &path) == AI_SUCCESS ||
-        material->GetTexture(aiTextureType_SHININESS, 0, &path) == AI_SUCCESS) {
-        roughPath = resolveTexPath(path);
-    }
-
-    // Metallic map
-    if (material->GetTexture(aiTextureType_METALNESS, 0, &path) == AI_SUCCESS) {
-        metalPath = resolveTexPath(path);
-    }
-
-    // Height / Displacement map
+    
     if (material->GetTexture(aiTextureType_DISPLACEMENT, 0, &path) == AI_SUCCESS ||
         material->GetTexture(aiTextureType_HEIGHT, 0, &path) == AI_SUCCESS) {
         heightPath = resolveTexPath(path);
+        
+        // Try to get height scale factor
+        float heightScale;
+        if (material->Get(AI_MATKEY_BUMPSCALING, heightScale) == AI_SUCCESS) {
+            mat.height_scale = heightScale;
+        }
     }
-
+    
     // Pack ORM map if there are any of the components
-    if (!aoPath.empty() || !roughPath.empty() || !metalPath.empty() || !heightPath.empty()) {
-        ORMResult packed = packORM(name, aoPath, roughPath, metalPath, heightPath, scene);
+    if (!aoPath.empty() || !roughPath.empty() || !metalPath.empty() || !heightPath.empty() || !specularPath.empty()) {
+        ORMResult packed = packORM(name, aoPath, roughPath, metalPath, heightPath, specularPath, scene);
         mat.orm_map = packed.textureID;
         if (packed.hasHeightData) mat.height_map = packed.textureID;
     }
-
-    // Emissive map
+    
+    // Check for emissive texture first
     if (material->GetTexture(aiTextureType_EMISSIVE, 0, &path) == AI_SUCCESS ||
         material->GetTexture(aiTextureType_EMISSION_COLOR, 0, &path) == AI_SUCCESS) {
         
-        std::string texPath = path.C_Str();
+        std::string texPath = resolveTexPath(path);
         
-        if (texPath[0] == '*') {
+        if (!texPath.empty() && texPath[0] == '*') {
             int texIndex = std::atoi(texPath.c_str() + 1);
             if (texIndex >= 0 && texIndex < (int)scene->mNumTextures) {
                 aiTexture* embeddedTex = scene->mTextures[texIndex];
                 
                 if (embeddedTex->mHeight == 0) {
+                    // Compressed texture
                     mat.emissive_map = loadTextureFromMemory((unsigned char*)embeddedTex->pcData, embeddedTex->mWidth);
                 } else {
-                    mat.emissive_map = loadTextureFromARGB(embeddedTex->pcData, embeddedTex->mWidth, embeddedTex->mHeight);
+                    // Uncompressed ARGB data
+                    mat.emissive_map= loadTextureFromARGB(embeddedTex->pcData, embeddedTex->mWidth, embeddedTex->mHeight);
                 }
             }
-        } else {
-            mat.emissive_map = loadTexture(buildAssetPath(resolveTexturePath(modelPath, texPath)));
+        } else if (!texPath.empty()) {
+            // External texture file
+            mat.emissive_map = loadTexture(texPath);
         }
     }
-
+    
+    if (!mat.hasEmissiveMap()) {
+        aiColor3D emissiveColor;
+        if (material->Get(AI_MATKEY_COLOR_EMISSIVE, emissiveColor) == AI_SUCCESS) {
+            mat.emissive = glm::vec3(emissiveColor.r, emissiveColor.g, emissiveColor.b);
+            
+            // Also check for emissive intensity/strength multiplier
+            float emissiveStrength;
+            if (material->Get(AI_MATKEY_EMISSIVE_INTENSITY, emissiveStrength) == AI_SUCCESS) {
+                mat.emissive *= emissiveStrength;
+            }
+        }
+    }
+    
     mat.name = name;
     return mat;
 }
@@ -2049,7 +2335,8 @@ std::vector<std::unique_ptr<Mesh>> loadMesh(const std::string& filepath) {
         aiProcess_JoinIdenticalVertices |
         aiProcess_ImproveCacheLocality |
         aiProcess_OptimizeMeshes |
-        aiProcess_CalcTangentSpace);
+        aiProcess_CalcTangentSpace |
+        aiProcess_PreTransformVertices);
 
     if (!scene || scene->mFlags & AI_SCENE_FLAGS_INCOMPLETE || !scene->mRootNode) {
         printf("Assimp error: %s\n", importer.GetErrorString());
@@ -2096,6 +2383,10 @@ std::vector<std::unique_ptr<Mesh>> loadMesh(const std::string& filepath) {
                     newMesh->vertices_data.push_back(mesh->mNormals[v].x);
                     newMesh->vertices_data.push_back(mesh->mNormals[v].y);
                     newMesh->vertices_data.push_back(mesh->mNormals[v].z);
+                } else {
+                    newMesh->vertices_data.push_back(0.0f);
+                    newMesh->vertices_data.push_back(0.0f);
+                    newMesh->vertices_data.push_back(1.0f);
                 }
                 
                 // Tangent
@@ -2148,7 +2439,7 @@ std::vector<std::unique_ptr<Mesh>> loadMesh(const std::string& filepath) {
             glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, newMesh->EBO);
             glBufferData(GL_ELEMENT_ARRAY_BUFFER, newMesh->indices_data.size() * sizeof(unsigned int), newMesh->indices_data.data(), GL_STATIC_DRAW);
 
-            // Stride = (3+4+2+3+3+3) floats = 18 floats
+            // Stride = 3 + 4 + 2 + 3 + 3 + 3 = 18 floats
             constexpr GLsizei stride = 18 * sizeof(float);
 
             // aPos (location = 0)
@@ -2215,7 +2506,7 @@ int main() {
     // Anti-aliasing
     glfwWindowHint(GLFW_SAMPLES, 4);
     
-    GLFWwindow* window = glfwCreateWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "OpenGL 3D Engine", NULL, NULL);
+    GLFWwindow* window = glfwCreateWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "OpenGL 3D Engine by @mu-gua-here", NULL, NULL);
     if (!window) {
         printf("Failed to create GLFW window\n");
         glfwTerminate();
@@ -2247,6 +2538,11 @@ int main() {
     glfwSetCursorPosCallback(window, mouse_callback);
     glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
     
+    // Performance settings
+    glGenQueries(2, shadowQueries);
+    glGenQueries(2, mainQueries);
+    glGenQueries(2, skyboxQueries);
+
     // Find executable path
     std::filesystem::path executable_path = getExecutablePath();
 
@@ -2320,9 +2616,9 @@ int main() {
     auto sphere_mesh = loadMesh("sphere/sphere.obj");
     auto streetlight_mesh = loadMesh("streetlight/streetlight.obj");
     auto cone_mesh = loadMesh("cone/cone.obj");
-    auto road_mesh = loadMesh("modular_road/modular_road.glb");
-    auto statue_mesh = loadMesh("statue/tinker.obj");
+    auto statue_mesh = loadMesh("statue/statue_of_myself.obj");
     auto plastic_table = loadMesh("plastic_table/plastic_table.obj");
+    auto road_mesh = loadMesh("modular_road/modular_road_pack.obj");
     
     // ============================================================================
     // CREATE SCENE OBJECTS
@@ -2331,8 +2627,8 @@ int main() {
     // CREATE LIGHT SOURCES //
     
     createDirLight("sun", glm::vec3(1, -1, -1), glm::vec3(1, 1, 1), 10);
-    createPointLight("streetlamp", glm::vec3(-7.05, 3.5, 0.05), glm::vec3(1, 1, 1), 250,
-                    {}, glm::vec3(0.1, 0.1, 0.1), std::vector<int>{CULL_BACK});
+    /* createPointLight("streetlamp", glm::vec3(-7.05, 3.5, 0.05), glm::vec3(1, 1, 1), 250,
+                    {}, glm::vec3(0.1, 0.1, 0.1), std::vector<int>{CULL_BACK}); */
     createSpotlight("torchlight", glm::vec3(0, 10, 0), glm::vec3(1, 1, 1), 50,
                     glm::vec3(0, -1, 0), 7.5f, 17.5f,
                     {}, glm::vec3(0.1, 0.1, 0.1), std::vector<int>{CULL_BACK});
@@ -2349,9 +2645,9 @@ int main() {
     createEntity("sphere", std::move(sphere_mesh), glm::vec3(0, 2, -5), glm::vec3(0, 0, 0), glm::vec3(1, 1, 1), std::vector<int> {CULL_BACK});
     createEntity("streetlight", std::move(streetlight_mesh), glm::vec3(-7, 0.02, 0), glm::vec3(0, 0, 0), glm::vec3(1, 1, 1), std::vector<int>{CULL_BACK});
     createEntity("cone", std::move(cone_mesh), glm::vec3(0, 10, 0), glm::vec3(0, 0, 0), glm::vec3(0.1, 0.1, 0.1), std::vector<int>{CULL_BACK});
-    // createEntity("road", std::move(road_mesh), glm::vec3(50, 0, 0), glm::vec3(0, 0, 0), glm::vec3(1, 1, 1), std::vector<int>{CULL_NONE});
-    createEntity("statue", std::move(statue_mesh), glm::vec3(-5, 1.1, -5), glm::vec3(270, 270, 0), glm::vec3(0.1, 0.1, 0.1), std::vector<int>{CULL_BACK});
+    createEntity("statue", std::move(statue_mesh), glm::vec3(-5, 1.9, -4), glm::vec3(0, 0, 0), glm::vec3(0.1, 0.1, 0.1), std::vector<int>{CULL_BACK});
     createEntity("plastic_table", std::move(plastic_table), glm::vec3(-5, 0, -4), glm::vec3(0, 0, 0), glm::vec3(0.5, 0.5, 0.5), std::vector<int>{CULL_BACK});
+    createEntity("road", std::move(road_mesh), glm::vec3(-50, 0, 0), glm::vec3(0, 0, 0), glm::vec3(1, 1, 1), std::vector<int>{CULL_BACK});
 
     printf("Total triangles: %d\n", total_triangles);
     printf("Active entities: %zu\n", entity_manager.size());
@@ -2361,6 +2657,7 @@ int main() {
     // ============================================================================
     
     while (!glfwWindowShouldClose(window)) {
+        double frameStart = glfwGetTime();
         updateFPS(window);
         
         if (!paused) {
@@ -2393,20 +2690,25 @@ int main() {
             if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) {
                 cam_offset = cam_offset + glm::vec3(-sin_yaw, 0, cos_yaw);
             }
-            
-            // Vertical movement
-            if (glfwGetKey(window, GLFW_KEY_E) == GLFW_PRESS) {
-                global_camera.position.y += actual_cam_speed;
-            }
-            if (glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS) {
-                global_camera.position.y -= actual_cam_speed;
-            }
-            
+
             if (glm::length(cam_offset) > 0.0f) {
                 cam_offset = glm::normalize(cam_offset);
             }
+
+            global_camera_vel.x += cam_offset.x * actual_cam_speed;
+            global_camera_vel.z += cam_offset.z * actual_cam_speed;
             
-            global_camera.position = global_camera.position + cam_offset * actual_cam_speed;
+            // Vertical movement
+            if (glfwGetKey(window, GLFW_KEY_E) == GLFW_PRESS) {
+                global_camera_vel.y += actual_cam_speed;
+            }
+            if (glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS) {
+                global_camera_vel.y -= actual_cam_speed;
+            }
+
+            global_camera_vel *= friction;
+            
+            global_camera.position = global_camera.position + global_camera_vel;
             
             // Update camera matrices
             view = camera_get_view_matrix(&global_camera);
@@ -2418,14 +2720,16 @@ int main() {
             
             // UPDATE LIGHTS
             
-            updateLight("torchlight", glm::vec3(global_camera.position + global_camera.front + glm::vec3(-sin_yaw * 0.3f, 0, cos_yaw * 0.3f)), VEC3_NO_CHANGE, -1, glm::vec3(global_camera.front), glm::vec3(0, 0, 0));
+            updateLight("torchlight", glm::vec3(global_camera.position + global_camera.front + glm::vec3(-sin_yaw * 0.3f, 0, cos_yaw * 0.3f)),
+                        VEC3_NO_CHANGE, -1, glm::vec3(global_camera.front), glm::vec3(0, 0, 0));
             
             // UPDATE OBJECTS
             
-            // entity_manager.updateEntity("cube", VEC3_NO_CHANGE, glm::vec3(update_count * 0.1f, update_count * 0.1f, update_count * 0.1f), VEC3_NO_CHANGE);
+            entity_manager.updateEntity("cube", VEC3_NO_CHANGE, glm::vec3(update_count * 0.1f, update_count * 0.1f, update_count * 0.1f), VEC3_NO_CHANGE);
             entity_manager.updateEntity("sphere", glm::vec3(NAN, 2.5f + sinf(update_count * 0.01f), NAN), glm::vec3(update_count, 0, 0), VEC3_NO_CHANGE);
             entity_manager.updateEntity("cone", glm::vec3(global_camera.position + global_camera.front + glm::vec3(-sin_yaw * 0.3f, 0, cos_yaw * 0.3f)), convertVecToEuler(global_camera.front, glm::vec3(90, 0, 0)), VEC3_NO_CHANGE);
-            
+            entity_manager.updateEntity("statue", VEC3_NO_CHANGE, glm::vec3(NAN, update_count, NAN), VEC3_NO_CHANGE);
+
             update_count += tick_speed;
         }
         
@@ -2433,19 +2737,25 @@ int main() {
         glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         
-        renderer->setLightingUniforms();
-        
         // Render shadow map
+        glBeginQuery(GL_TIME_ELAPSED, shadowQueries[queryIndex]);
         int shadowLightIndex = -1;
         for (size_t i = 0; i < lights.size(); i++) {
             renderer->renderShadowPass(entity_manager, lights[i]);
             shadowLightIndex = static_cast<int>(i);
             break; // Only render shadows for the first shadow-casting light
         }
+        glEndQuery(GL_TIME_ELAPSED);
                 
         // Render skybox before other objects
+        glBeginQuery(GL_TIME_ELAPSED, skyboxQueries[queryIndex]);
         skybox.render(&global_camera);
+        glEndQuery(GL_TIME_ELAPSED);
         
+        // Set PBR shader uniforms
+        glBeginQuery(GL_TIME_ELAPSED, mainQueries[queryIndex]);
+        renderer->setGlobalUniforms(global_camera);
+
         // Render all entities
         for (size_t i = 0; i < entity_manager.size(); i++) {
             Entity* entity = entity_manager.getEntityAt(i);
@@ -2472,39 +2782,46 @@ int main() {
                 }
             }
         }
-        
+        glEndQuery(GL_TIME_ELAPSED);
+
+        queryIndex = 1 - queryIndex;
+
         glfwPollEvents();
-        
+
+        prevIndex = 1 - queryIndex;        
+
         // ============================================================================
         // UI & WINDOW CONTROL
         // ============================================================================
         
-        // Render and update ImGui GUI
+        // UPDATE IMGUI GUI
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
-        
+        ImGui::SetNextWindowPos(ImVec2(10, 10));
         ImGui::Begin("Engine");
         ImGui::Text("FPS: %.1f", fps);
         ImGui::Text("Triangles: %u", total_triangles);
+        ImGui::Text("GPU Frame Time:");
+        ImGui::Text("Shadows: %.3f ms", shadowTime);
+        ImGui::Text("Skybox: %.3f ms", skyboxTime);
+        ImGui::Text("Main: %.3f ms", mainTime);
+        ImGui::Text("Total GPU: %.3f ms", shadowTime + skyboxTime + mainTime);
         if (ImGui::Button("V-Sync ON")) glfwSwapInterval(1);
         if (ImGui::Button("V-Sync OFF")) glfwSwapInterval(0);
         ImGui::End();
-        
-        ImGui::Render();
-        ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
-        
-        glfwSwapBuffers(window);
-        
+
         // Handle mouse cursor pointerlock/normal modes
         if (glfwGetInputMode(window, GLFW_CURSOR) == GLFW_CURSOR_NORMAL && !ImGui::GetIO().WantCaptureMouse) {
             if (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT)) {
                 firstMouse = true;
                 glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED); // Enable pointerlock
+                paused = false;
             }
         } else {
             if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS) {
                 glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL); // Disable pointerlock
+                paused = true;
             }
         }
         
@@ -2526,7 +2843,7 @@ int main() {
                 WINDOW_WIDTH = 800;
                 WINDOW_HEIGHT = 600;
                 glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL); // Free cursor
-                glfwSetWindowMonitor(window, nullptr, 0, 0, 800, 600, 0);
+                glfwSetWindowMonitor(window, nullptr, 0, 0, WINDOW_WIDTH, WINDOW_HEIGHT, 0);
                 fullscreen = false;
                 
                 // Center the window
@@ -2539,6 +2856,21 @@ int main() {
             }
         }
         if (glfwGetKey(window, GLFW_KEY_ENTER) == GLFW_RELEASE && glfwGetKey(window, GLFW_KEY_LEFT_ALT)) fullscreen_toggle = false;
+
+        // Pause menu (temporary)
+        if (paused) {
+            ImGui::SetNextWindowPos(ImVec2(WINDOW_WIDTH / 2 - 75, WINDOW_HEIGHT / 2 - 25));
+            ImGui::Begin("PAUSED");
+            ImGui::Text("CLICK AGAIN TO UNPAUSE");
+            ImGui::End();
+        }
+
+        // END GUI FRAME & RENDER
+        ImGui::Render();
+        ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+
+        glfwSwapBuffers(window);
+        glFlush();
     }
     
     // ============================================================================
@@ -2552,6 +2884,11 @@ int main() {
         glDeleteTextures(1, &default_texture_id);
         default_texture_id = 0;
     }
+
+    // Cleanup GPU timers
+    glDeleteQueries(2, shadowQueries);
+    glDeleteQueries(2, mainQueries);
+    glDeleteQueries(2, skyboxQueries);
     
     cleanupShadowMap();
     

@@ -1,2 +1,18 @@
 # Blender 4.5.4 LTS MTL File: 'None'
 # www.blender.org
+
+newmtl RustedMetal
+Ns 250.000000
+Ka 1.000000 1.000000 1.000000
+Kd 0.800000 0.800000 0.800000
+Ks 0.500000 0.500000 0.500000
+Ke 0.000000 0.000000 0.000000
+Ni 1.450000
+d 1.000000
+illum 2
+norm A23DTEX_Normal.jpg
+map_Ka A23DTEX_Ambient Occlusion.jpg
+map_Bump A23DTEX_Height.jpg
+map_Pr A23DTEX_Roughness.jpg
+map_Ks A23DTEX_Specular.jpg
+map_Kd A23DTEX_Albedo.jpg
