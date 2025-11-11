@@ -114,8 +114,8 @@ elseif(APPLE AND GLFW_LIBRARY AND ASSIMP_LIBRARY)
 elseif(UNIX AND NOT APPLE)
     # Linux - try system libraries first
     find_package(OpenGL REQUIRED)
-    find_package(glfw3 QUIET)
-    find_package(assimp QUIET)
+    find_package(glfw3 REQUIRED)
+    find_package(assimp REQUIRED)
     
     if(glfw3_FOUND AND assimp_FOUND)
         message(STATUS "Using system libraries for Linux")
@@ -125,13 +125,6 @@ elseif(UNIX AND NOT APPLE)
             assimp
             ${CMAKE_DL_LIBS}
             pthread
-        )
-    else()
-        # Fallback to local precompiled
-        message(STATUS "Using local precompiled libraries for Linux")
-        target_include_directories(${PROJECT_NAME} PRIVATE
-            external/glfw/include
-            external/assimp/include
         )
         
         target_link_libraries(${PROJECT_NAME} PRIVATE

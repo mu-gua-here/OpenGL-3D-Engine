@@ -73,15 +73,19 @@ jobs:
           name: linux-build
           path: dist/linux/
           
+      - name: Install Butler (Linux)
+        run: |
+          curl -L -o butler.zip https://broth.itch.ovh/butler/linux-amd64/LATEST/archive/default
+          unzip butler.zip
+          chmod +x butler
+          ./butler -V
+          
       - name: Push to itch.io (Linux)
-        uses: manleydev/butler-publish-itchio-action@v1.0.3
+        run: |
+          ./butler push dist/linux ${{ env.ITCH_USER }}/${{ env.ITCH_GAME }}:linux \
+            --userversion ${{ github.ref_name }}-${{ github.sha }}
         env:
-          BUTLER_CREDENTIALS: ${{ secrets.BUTLER_API_KEY }}
-          ITCH_USER: ${{ env.ITCH_USER }}
-          ITCH_GAME: ${{ env.ITCH_GAME }}
-          PACKAGE: dist/linux
-          CHANNEL: linux
-          VERSION: ${{ github.run_number }}
+          BUTLER_API_KEY: ${{ secrets.BUTLER_API_KEY }}
 
 
   # 2. WINDOWS BUILD JOB
@@ -137,18 +141,23 @@ jobs:
           name: windows-build
           path: dist/windows/
           
+      - name: Install Butler (Windows)
+        shell: powershell
+        run: |
+          Invoke-WebRequest -Uri "https://broth.itch.ovh/butler/windows-amd64/LATEST/archive/default" -OutFile "butler.zip"
+          Expand-Archive -Path "butler.zip" -DestinationPath "."
+          .\butler -V
+          
       - name: Push to itch.io (Windows)
-        uses: manleydev/butler-publish-itchio-action@v1.0.3
+        shell: powershell
+        run: |
+          .\butler push dist/windows ${{ env.ITCH_USER }}/${{ env.ITCH_GAME }}:windows --userversion ${{ github.ref_name }}-${{ github.sha }}
         env:
-          BUTLER_CREDENTIALS: ${{ secrets.BUTLER_API_KEY }}
-          ITCH_USER: ${{ env.ITCH_USER }}
-          ITCH_GAME: ${{ env.ITCH_GAME }}
-          PACKAGE: dist/windows
-          CHANNEL: windows
-          VERSION: ${{ github.run_number }}
+          BUTLER_API_KEY: ${{ secrets.BUTLER_API_KEY }}
 
 
   # 3. MACOS BUILD JOB
+
   build_macos:
     runs-on: macos-latest
     steps:
@@ -156,70 +165,63 @@ jobs:
       
       - name: Install Dependencies (macOS)
         run: |
+          # Install GLFW and Assimp via Homebrew
           brew install glfw assimp
       
       - name: Configure and Build (macOS)
         run: |
+          # Build with system-installed libraries
           cmake -S . -B build_macos \
             -DCMAKE_BUILD_TYPE=Release \
-            -DGLFW_LIBRARY=$(brew --prefix glfw)/lib/libglfw.dylib \
-            -DGLFW_INCLUDE_DIR=$(brew --prefix glfw)/include \
-            -DASSIMP_LIBRARY=$(brew --prefix assimp)/lib/libassimp.dylib \
-            -DASSIMP_INCLUDE_DIR=$(brew --prefix assimp)/include
-          cmake --build build_macos --config Release -j$(sysctl -n hw.ncpu)
+            -DGLFW_LIBRARY=/opt/homebrew/lib/libglfw.dylib \
+            -DGLFW_INCLUDE_DIR=/opt/homebrew/include \
+            -DASSIMP_LIBRARY=/opt/homebrew/lib/libassimp.dylib \
+            -DASSIMP_INCLUDE_DIR=/opt/homebrew/include
+          cmake --build build_macos --config Release
         
       - name: Package macOS Build
         run: |
+          set -euo pipefail
           mkdir -p dist/macos
           
-          # Find binary
-          BIN=$(find build_macos -type f -name 'OpenGL-3D-Engine' -perm +111 | head -n1)
+          # Find the macOS binary
+          BIN=$(find build_macos/bin -type f -name 'OpenGL-3D-Engine' 2>/dev/null | head -n1 || true)
+          if [ -z "$BIN" ]; then
+            BIN=$(find build_macos -type f -name 'OpenGL-3D-Engine' 2>/dev/null | head -n1 || true)
+          fi
           
           if [ -z "$BIN" ]; then
-            echo "ERROR: Binary not found"
-            find build_macos -type f -perm +111
+            echo "ERROR: Could not find macOS binary" >&2
+            echo "Build directory contents:"
+            find build_macos -type f -perm +111 || true
             exit 1
           fi
           
-          echo "Found binary: $BIN"
+          echo "Found binary at: $BIN"
           cp "$BIN" dist/macos/
           
           # Copy dynamic libraries
           mkdir -p dist/macos/lib
-          otool -L "$BIN" | grep '/opt/homebrew\|/usr/local' | \
-            awk '{print $1}' | while read lib; do
+          otool -L "$BIN" | grep /opt/homebrew | awk '{print $1}' | while read lib; do
             if [ -f "$lib" ]; then
-              cp "$lib" dist/macos/lib/ || true
+              cp "$lib" dist/macos/lib/
             fi
           done
           
-          # Update library paths
-          install_name_tool -add_rpath @executable_path/lib dist/macos/OpenGL-3D-Engine || true
+          # Copy asset folders
+          cp -r scene_models dist/macos/
+          cp -r skyboxes dist/macos/
           
-          # Copy assets
-          cp -r scene_models skyboxes dist/macos/
-          
-          # Create run script
-          cat > dist/macos/run.sh << 'EOF'
-          #!/bin/bash
-          cd "$(dirname "$0")"
-          export DYLD_LIBRARY_PATH="$PWD/lib:$DYLD_LIBRARY_PATH"
-          ./OpenGL-3D-Engine
-          EOF
-          chmod +x dist/macos/run.sh
-          
-      - name: Upload Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: macos-build
-          path: dist/macos/
+      - name: Install Butler (macOS)
+        run: |
+          curl -L -o butler.zip https://broth.itch.ovh/butler/darwin-amd64/LATEST/archive/default
+          unzip butler.zip
+          chmod +x butler
+          ./butler -V
           
       - name: Push to itch.io (macOS)
-        uses: manleydev/butler-publish-itchio-action@v1.0.3
+        run: |
+          ./butler push dist/macos mu-gua-here/opengl-3d-engine-demo:osx \
+            --userversion ${{ github.ref_name }}-${{ github.sha }}
         env:
-          BUTLER_CREDENTIALS: ${{ secrets.BUTLER_API_KEY }}
-          ITCH_USER: ${{ env.ITCH_USER }}
-          ITCH_GAME: ${{ env.ITCH_GAME }}
-          PACKAGE: dist/macos
-          CHANNEL: osx
-          VERSION: ${{ github.run_number }}
+          BUTLER_API_KEY: ${{ secrets.BUTLER_API_KEY }}
