@@ -112,21 +112,35 @@ elseif(APPLE AND GLFW_LIBRARY AND ASSIMP_LIBRARY)
     )
     
 elseif(UNIX AND NOT APPLE)
-    # Linux - use the Module finder for OpenGL and Assimp
+    # Linux - Manually specify library locations as automatic detection fails in CI
     find_package(OpenGL REQUIRED)
+    message(STATUS "Found OpenGL system library")
+
+    # Manually define standard Ubuntu paths
+    set(GLFW_INCLUDE_DIR /usr/include)
+    set(GLFW_LIBRARY /usr/lib/x86_64-linux-gnu/libglfw3.so)
+    set(ASSIMP_INCLUDE_DIR /usr/include)
+    set(ASSIMP_LIBRARY /usr/lib/x86_64-linux-gnu/libassimp.so)
     
-    # Force module mode search, this should use the exported PKG_CONFIG_PATH
-    find_package(GLFW REQUIRED MODULE) 
-    find_package(Assimp REQUIRED MODULE)
-    
-    message(STATUS "Using system libraries for Linux via Find modules")
-    target_link_libraries(${PROJECT_NAME} PRIVATE
-        OpenGL::GL
-        ${GLFW_LIBRARIES} 
-        ${ASSIMP_LIBRARIES} 
-        ${CMAKE_DL_LIBS}
-        pthread
-    )
+    # Check if files exist just in case
+    if(EXISTS ${GLFW_LIBRARY} AND EXISTS ${ASSIMP_LIBRARY})
+        message(STATUS "Manually linking system libraries for Linux")
+        
+        target_include_directories(${PROJECT_NAME} PRIVATE
+            ${GLFW_INCLUDE_DIR}
+            ${ASSIMP_INCLUDE_DIR}
+        )
+
+        target_link_libraries(${PROJECT_NAME} PRIVATE
+            OpenGL::GL
+            ${GLFW_LIBRARY}
+            ${ASSIMP_LIBRARY}
+            ${CMAKE_DL_LIBS}
+            pthread
+        )
+    else()
+        message(FATAL_ERROR "Hardcoded Linux library paths did not point to existing files. Review apt-get install step.")
+    endif()
     
 else()
     # Fallback to local precompiled libraries (development)

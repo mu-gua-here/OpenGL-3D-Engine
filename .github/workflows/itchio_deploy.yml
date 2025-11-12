@@ -39,9 +39,6 @@ jobs:
 
       - name: Configure and Build (Linux)
         run: |
-          # Export PKG_CONFIG_PATH so that CMake's FindGLFW module can find the .pc files
-          export PKG_CONFIG_PATH=/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/share/pkgconfig
-          
           cmake -S . -B build_linux \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_VERBOSE_MAKEFILE=ON
