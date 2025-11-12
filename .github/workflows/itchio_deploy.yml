@@ -31,7 +31,9 @@ jobs:
             libxi-dev \
             libxext-dev \
             libwayland-dev \
-            libxkbcommon-dev
+            libxkbcommon-dev \
+            libglfw3-dev \
+            libassimp-dev
 
       - name: Configure and Build (Linux)
         run: |

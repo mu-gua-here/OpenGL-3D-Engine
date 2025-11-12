@@ -114,23 +114,15 @@ elseif(APPLE AND GLFW_LIBRARY AND ASSIMP_LIBRARY)
 elseif(UNIX AND NOT APPLE)
     # Linux - try system libraries first
     find_package(OpenGL REQUIRED)
-    find_package(glfw3 REQUIRED)
-    find_package(assimp REQUIRED)
+    find_package(GLFW REQUIRED)
+    find_package(Assimp REQUIRED)
     
-    if(glfw3_FOUND AND assimp_FOUND)
+    if(GLFW_FOUND AND ASSIMP_FOUND)
         message(STATUS "Using system libraries for Linux")
         target_link_libraries(${PROJECT_NAME} PRIVATE
             OpenGL::GL
-            glfw
-            assimp
-            ${CMAKE_DL_LIBS}
-            pthread
-        )
-        
-        target_link_libraries(${PROJECT_NAME} PRIVATE
-            OpenGL::GL
-            "${CMAKE_SOURCE_DIR}/external/glfw/libglfw3.a"
-            "${CMAKE_SOURCE_DIR}/external/assimp/libassimp.a"
+            ${GLFW_LIBRARIES}
+            ${ASSIMP_LIBRARIES}
             ${CMAKE_DL_LIBS}
             pthread
         )
