@@ -12,6 +12,7 @@ env:
 jobs:
 
   # 1. LINUX BUILD JOB
+  # 1. LINUX BUILD JOB
   build_linux:
     runs-on: ubuntu-latest
     steps:
@@ -23,6 +24,7 @@ jobs:
           sudo apt-get install -y \
             build-essential \
             cmake \
+            pkg-config \
             libgl-dev \
             libx11-dev \
             libxrandr-dev \
@@ -37,6 +39,9 @@ jobs:
 
       - name: Configure and Build (Linux)
         run: |
+          # Use pkg-config to set environment variables for CMake to use its module finders
+          export PKG_CONFIG_PATH=/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/share/pkgconfig
+          
           cmake -S . -B build_linux \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_VERBOSE_MAKEFILE=ON
