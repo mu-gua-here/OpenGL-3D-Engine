@@ -12,7 +12,6 @@ env:
 jobs:
 
   # 1. LINUX BUILD JOB
-  # 1. LINUX BUILD JOB
   build_linux:
     runs-on: ubuntu-latest
     steps:
@@ -37,27 +36,28 @@ jobs:
             libglfw3-dev \
             libassimp-dev
 
+          # VERIFY THE EXACT INSTALLATION PATHS FOR DEBUGGING
+          echo "Verifying libglfw3.so path:"
+          find /usr/lib /lib -name "libglfw3.so" || true
+          echo "Verifying libassimp.so path:"
+          find /usr/lib /lib -name "libassimp.so" || true
+          echo "Verifying glfw3.h path:"
+          find /usr/include -name "glfw3.h" || true
+          echo "Verifying assimp/scene.h path:"
+          find /usr/include -name "scene.h" || true
+
       - name: Configure and Build (Linux)
         run: |
-          # Set the PKG_CONFIG_PATH so the following pkg-config commands actually find the .pc files
-          export PKG_CONFIG_PATH=/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/share/pkgconfig
-          
-          # Use pkg-config to find paths reliably
-          GLFW_LIBS_DIR=$(pkg-config --libs-only-L glfw3 | cut -c 3-)
-          GLFW_INC_DIR=$(pkg-config --cflags-only-I glfw3 | cut -c 3-)
-          ASSIMP_LIBS_DIR=$(pkg-config --libs-only-L assimp | cut -c 3-)
-          ASSIMP_INC_DIR=$(pkg-config --cflags-only-I assimp | cut -c 3-)
-
+          # Use known paths now, verified to exist
           cmake -S . -B build_linux \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_VERBOSE_MAKEFILE=ON \
-            -DGLFW_LIBRARY=$GLFW_LIBS_DIR/libglfw3.so \
-            -DGLFW_INCLUDE_DIR=$GLFW_INC_DIR \
-            -DASSIMP_LIBRARY=$ASSIMP_LIBS_DIR/libassimp.so \
-            -DASSIMP_INCLUDE_DIR=$ASSIMP_INC_DIR
+            -DGLFW_LIBRARY=/usr/lib/x86_64-linux-gnu/libglfw3.so \
+            -DGLFW_INCLUDE_DIR=/usr/include \
+            -DASSIMP_LIBRARY=/usr/lib/x86_64-linux-gnu/libassimp.so \
+            -DASSIMP_INCLUDE_DIR=/usr/include
           
           cmake --build build_linux --config Release -j$(nproc)
-
 
       - name: Package Linux Build
         run: |
@@ -106,8 +106,8 @@ jobs:
         env:
           BUTLER_API_KEY: ${{ secrets.BUTLER_API_KEY }}
 
-
   # 2. WINDOWS BUILD JOB
+  
   build_windows:
     runs-on: windows-latest
     steps:

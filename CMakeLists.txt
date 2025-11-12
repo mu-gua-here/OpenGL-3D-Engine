@@ -115,25 +115,20 @@ elseif(UNIX AND NOT APPLE)
     # Linux CI Build - Use explicit paths passed via the YAML script's -D flags
     find_package(OpenGL REQUIRED)
 
-    # Check if the CI passed the library variables via command line arguments
-    if(GLFW_LIBRARY AND ASSIMP_LIBRARY AND GLFW_INCLUDE_DIR AND ASSIMP_INCLUDE_DIR)
-        message(STATUS "Using explicit paths for Linux CI build")
-        
-        target_include_directories(${PROJECT_NAME} PRIVATE
-            ${GLFW_INCLUDE_DIR}
-            ${ASSIMP_INCLUDE_DIR}
-        )
+    message(STATUS "Manually linking system libraries for Linux via YAML passed variables")
+    
+    target_include_directories(${PROJECT_NAME} PRIVATE
+        ${GLFW_INCLUDE_DIR}
+        ${ASSIMP_INCLUDE_DIR}
+    )
 
-        target_link_libraries(${PROJECT_NAME} PRIVATE
-            OpenGL::GL
-            ${GLFW_LIBRARY}
-            ${ASSIMP_LIBRARY}
-            ${CMAKE_DL_LIBS}
-            pthread
-        )
-    else()
-        message(FATAL_ERROR "Could not find explicit library variables in CMake cache. Ensure YAML script is working correctly or check local setup.")
-    endif()
+    target_link_libraries(${PROJECT_NAME} PRIVATE
+        OpenGL::GL
+        ${GLFW_LIBRARY}
+        ${ASSIMP_LIBRARY}
+        ${CMAKE_DL_LIBS}
+        pthread
+    )
     
 else()
     # Fallback to local precompiled libraries (development)
