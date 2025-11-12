@@ -47,12 +47,7 @@ jobs:
           ASSIMP_LIBS_DIR=$(pkg-config --libs-only-L assimp | cut -c 3-)
           ASSIMP_INC_DIR=$(pkg-config --cflags-only-I assimp | cut -c 3-)
 
-          cmake -S . -B build_linux \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_VERBOSE_MAKEFILE=ON \
-            -DCMAKE_LIBRARY_PATH=$GLFW_LIBS_DIR;$ASSIMP_LIBS_DIR \
-            -DGLFW_INCLUDE_DIR=$GLFW_INC_DIR \
-            -DASSIMP_INCLUDE_DIR=$ASSIMP_INC_DIR
+          cmake -S . -B build_linux -DCMAKE_BUILD_TYPE=Release -DCMAKE_VERBOSE_MAKEFILE=ON -DCMAKE_LIBRARY_PATH=$GLFW_LIBS_DIR;$ASSIMP_LIBS_DIR -DGLFW_INCLUDE_DIR=$GLFW_INC_DIR -DASSIMP_INCLUDE_DIR=$ASSIMP_INC_DIR
           
           cmake --build build_linux --config Release -j$(nproc)
 
