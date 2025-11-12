@@ -127,10 +127,6 @@ elseif(UNIX AND NOT APPLE)
         ${CMAKE_DL_LIBS}
         pthread
     )
-    else()
-        # Fallback for local Linux dev environments that might rely on module finders
-        message(FATAL_ERROR "CI variables not found, standard find_package fallback not implemented yet.")
-    endif()
     
 else()
     # Fallback to local precompiled libraries (development)
