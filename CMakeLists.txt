@@ -124,8 +124,8 @@ elseif(UNIX AND NOT APPLE)
 
     target_link_libraries(${PROJECT_NAME} PRIVATE
         OpenGL::GL
-        ${GLFW_LIBRARY}
-        ${ASSIMP_LIBRARY}
+        glfw
+        assimp
         ${CMAKE_DL_LIBS}
         pthread
     )
