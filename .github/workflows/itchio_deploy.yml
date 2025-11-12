@@ -39,17 +39,14 @@ jobs:
 
       - name: Configure and Build (Linux)
         run: |
+          # Set the PKG_CONFIG_PATH so the following pkg-config commands actually find the .pc files
+          export PKG_CONFIG_PATH=/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/share/pkgconfig
+          
           # Use pkg-config to find paths reliably
           GLFW_LIBS_DIR=$(pkg-config --libs-only-L glfw3 | cut -c 3-)
           GLFW_INC_DIR=$(pkg-config --cflags-only-I glfw3 | cut -c 3-)
           ASSIMP_LIBS_DIR=$(pkg-config --libs-only-L assimp | cut -c 3-)
           ASSIMP_INC_DIR=$(pkg-config --cflags-only-I assimp | cut -c 3-)
-
-          # Print variables for debugging purposes
-          echo "GLFW_LIBS_DIR: $GLFW_LIBS_DIR"
-          echo "GLFW_INC_DIR: $GLFW_INC_DIR"
-          echo "ASSIMP_LIBS_DIR: $ASSIMP_LIBS_DIR"
-          echo "ASSIMP_INC_DIR: $ASSIMP_INC_DIR"
 
           cmake -S . -B build_linux \
             -DCMAKE_BUILD_TYPE=Release \
