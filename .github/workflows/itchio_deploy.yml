@@ -39,12 +39,20 @@ jobs:
 
       - name: Configure and Build (Linux)
         run: |
-          # Use pkg-config to set environment variables for CMake to use its module finders
-          export PKG_CONFIG_PATH=/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/share/pkgconfig
-          
+          # Use pkg-config to find paths
+          GLFW_LIBS_DIR=$(pkg-config --libs-only-L glfw3 | cut -c 3-)
+          GLFW_INC_DIR=$(pkg-config --cflags-only-I glfw3 | cut -c 3-)
+          ASSIMP_LIBS_DIR=$(pkg-config --libs-only-L assimp | cut -c 3-)
+          ASSIMP_INC_DIR=$(pkg-config --cflags-only-I assimp | cut -c 3-)
+
           cmake -S . -B build_linux \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_VERBOSE_MAKEFILE=ON
+            -DCMAKE_VERBOSE_MAKEFILE=ON \
+            -DGLFW_LIBRARY=$GLFW_LIBS_DIR/libglfw3.so \
+            -DGLFW_INCLUDE_DIR=$GLFW_INC_DIR \
+            -DASSIMP_LIBRARY=$ASSIMP_LIBS_DIR/libassimp.so \
+            -DASSIMP_INCLUDE_DIR=$ASSIMP_INC_DIR
+          
           cmake --build build_linux --config Release -j$(nproc)
 
       - name: Package Linux Build
@@ -205,13 +213,17 @@ jobs:
           fi
           
           echo "Found binary at: $BIN"
-          cp "$BIN" dist/macos/
+          cp "$BIN" dist/macos/OpenGL-3D-Engine 
           
           # Copy dynamic libraries
           mkdir -p dist/macos/lib
-          otool -L "$BIN" | grep /opt/homebrew | awk '{print $1}' | while read lib; do
+          
+          # Use otool to find dependencies, copy them, and FIX the binary's load paths
+          for lib in $(otool -L "$BIN" | grep /opt/homebrew | awk '{print $1}'); do
             if [ -f "$lib" ]; then
-              cp "$lib" dist/macos/lib/
+              LIB_BASENAME=$(basename "$lib")
+              cp "$lib" dist/macos/lib/"$LIB_BASENAME"
+              install_name_tool -change "$lib" @executable_path/lib/"$LIB_BASENAME" dist/macos/OpenGL-3D-Engine
             fi
           done
           
