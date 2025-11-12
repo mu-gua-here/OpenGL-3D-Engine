@@ -39,20 +39,12 @@ jobs:
 
       - name: Configure and Build (Linux)
         run: |
-          # Use pkg-config to find paths
-          GLFW_LIBS_DIR=$(pkg-config --libs-only-L glfw3 | cut -c 3-)
-          GLFW_INC_DIR=$(pkg-config --cflags-only-I glfw3 | cut -c 3-)
-          ASSIMP_LIBS_DIR=$(pkg-config --libs-only-L assimp | cut -c 3-)
-          ASSIMP_INC_DIR=$(pkg-config --cflags-only-I assimp | cut -c 3-)
-
+          # Export PKG_CONFIG_PATH so that CMake's FindGLFW module can find the .pc files
+          export PKG_CONFIG_PATH=/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/share/pkgconfig
+          
           cmake -S . -B build_linux \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_VERBOSE_MAKEFILE=ON \
-            -DGLFW_LIBRARY=$GLFW_LIBS_DIR/libglfw3.so \
-            -DGLFW_INCLUDE_DIR=$GLFW_INC_DIR \
-            -DASSIMP_LIBRARY=$ASSIMP_LIBS_DIR/libassimp.so \
-            -DASSIMP_INCLUDE_DIR=$ASSIMP_INC_DIR
-          
+            -DCMAKE_VERBOSE_MAKEFILE=ON
           cmake --build build_linux --config Release -j$(nproc)
 
       - name: Package Linux Build

@@ -112,25 +112,21 @@ elseif(APPLE AND GLFW_LIBRARY AND ASSIMP_LIBRARY)
     )
     
 elseif(UNIX AND NOT APPLE)
-    # Linux - try system libraries first using explicit paths from CI environment
+    # Linux - use the Module finder for OpenGL and Assimp
     find_package(OpenGL REQUIRED)
-
-    # Use the variables provided by the CI script for linking
-    if(GLFW_LIBRARY AND ASSIMP_LIBRARY AND GLFW_INCLUDE_DIR AND ASSIMP_INCLUDE_DIR)
-        message(STATUS "Using explicit paths for Linux CI build")
-        
-        target_include_directories(${PROJECT_NAME} PRIVATE
-            ${GLFW_INCLUDE_DIR}
-            ${ASSIMP_INCLUDE_DIR}
-        )
-
-        target_link_libraries(${PROJECT_NAME} PRIVATE
-            OpenGL::GL
-            ${GLFW_LIBRARY}
-            ${ASSIMP_LIBRARY}
-            ${CMAKE_DL_LIBS}
-            pthread
-        )
+    
+    # Force module mode search, this should use the exported PKG_CONFIG_PATH
+    find_package(GLFW REQUIRED MODULE) 
+    find_package(Assimp REQUIRED MODULE)
+    
+    message(STATUS "Using system libraries for Linux via Find modules")
+    target_link_libraries(${PROJECT_NAME} PRIVATE
+        OpenGL::GL
+        ${GLFW_LIBRARIES} 
+        ${ASSIMP_LIBRARIES} 
+        ${CMAKE_DL_LIBS}
+        pthread
+    )
     else()
         # Fallback for local Linux dev environments that might rely on module finders
         message(FATAL_ERROR "CI variables not found, standard find_package fallback not implemented yet.")
