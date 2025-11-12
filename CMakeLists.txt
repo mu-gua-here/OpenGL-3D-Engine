@@ -112,19 +112,12 @@ elseif(APPLE AND GLFW_LIBRARY AND ASSIMP_LIBRARY)
     )
     
 elseif(UNIX AND NOT APPLE)
-    # Linux - Manually specify library locations as automatic detection fails in CI
+    # Linux CI Build - Use explicit paths passed via the YAML script's -D flags
     find_package(OpenGL REQUIRED)
-    message(STATUS "Found OpenGL system library")
 
-    # Manually define standard Ubuntu paths
-    set(GLFW_INCLUDE_DIR /usr/include)
-    set(GLFW_LIBRARY /usr/lib/x86_64-linux-gnu/libglfw3.so)
-    set(ASSIMP_INCLUDE_DIR /usr/include)
-    set(ASSIMP_LIBRARY /usr/lib/x86_64-linux-gnu/libassimp.so)
-    
-    # Check if files exist just in case
-    if(EXISTS ${GLFW_LIBRARY} AND EXISTS ${ASSIMP_LIBRARY})
-        message(STATUS "Manually linking system libraries for Linux")
+    # Check if the CI passed the library variables via command line arguments
+    if(GLFW_LIBRARY AND ASSIMP_LIBRARY AND GLFW_INCLUDE_DIR AND ASSIMP_INCLUDE_DIR)
+        message(STATUS "Using explicit paths for Linux CI build")
         
         target_include_directories(${PROJECT_NAME} PRIVATE
             ${GLFW_INCLUDE_DIR}
@@ -139,7 +132,7 @@ elseif(UNIX AND NOT APPLE)
             pthread
         )
     else()
-        message(FATAL_ERROR "Hardcoded Linux library paths did not point to existing files. Review apt-get install step.")
+        message(FATAL_ERROR "Could not find explicit library variables in CMake cache. Ensure YAML script is working correctly or check local setup.")
     endif()
     
 else()
