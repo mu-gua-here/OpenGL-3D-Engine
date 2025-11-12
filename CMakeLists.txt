@@ -114,7 +114,7 @@ elseif(APPLE AND GLFW_LIBRARY AND ASSIMP_LIBRARY)
 elseif(UNIX AND NOT APPLE)
     # Linux - try system libraries first
     find_package(OpenGL REQUIRED)
-    find_package(GLFW REQUIRED)
+    find_package(GLFW REQUIRED MODULE)
     find_package(Assimp REQUIRED)
     
     if(GLFW_FOUND AND ASSIMP_FOUND)
