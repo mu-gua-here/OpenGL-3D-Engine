@@ -36,7 +36,6 @@ jobs:
             libxkbcommon-dev \
             libglfw3-dev \
             libassimp-dev
-          # Note: ensure you still have pkg-config in this list
 
       - name: Configure and Build (Linux)
         run: |
@@ -45,6 +44,12 @@ jobs:
           GLFW_INC_DIR=$(pkg-config --cflags-only-I glfw3 | cut -c 3-)
           ASSIMP_LIBS_DIR=$(pkg-config --libs-only-L assimp | cut -c 3-)
           ASSIMP_INC_DIR=$(pkg-config --cflags-only-I assimp | cut -c 3-)
+
+          # Print variables for debugging purposes
+          echo "GLFW_LIBS_DIR: $GLFW_LIBS_DIR"
+          echo "GLFW_INC_DIR: $GLFW_INC_DIR"
+          echo "ASSIMP_LIBS_DIR: $ASSIMP_LIBS_DIR"
+          echo "ASSIMP_INC_DIR: $ASSIMP_INC_DIR"
 
           cmake -S . -B build_linux \
             -DCMAKE_BUILD_TYPE=Release \
@@ -55,6 +60,7 @@ jobs:
             -DASSIMP_INCLUDE_DIR=$ASSIMP_INC_DIR
           
           cmake --build build_linux --config Release -j$(nproc)
+
 
       - name: Package Linux Build
         run: |
