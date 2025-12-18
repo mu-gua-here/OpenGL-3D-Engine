@@ -1,242 +1,47 @@
-name: Build and Deploy Engine to Itch.io
+name: Deploy Engine to GitHub Pages
 
 on:
   push:
     branches: [ main ]
-  workflow_dispatch:  # Allow manual triggering
 
-env:
-  ITCH_USER: mu-gua-here
-  ITCH_GAME: opengl-3d-engine-demo
+permissions:
+  contents: read
+  pages: write
+  id-token: write
 
 jobs:
-
-  # 1. LINUX BUILD JOB
-  build_linux:
+  build-web:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       
-      - name: Install Dependencies (Linux)
+      - name: Setup Emscripten
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            build-essential \
-            cmake \
-            pkg-config \
-            libgl-dev \
-            libx11-dev \
-            libxrandr-dev \
-            libxinerama-dev \
-            libxcursor-dev \
-            libxi-dev \
-            libxext-dev \
-            libwayland-dev \
-            libxkbcommon-dev \
-            libglfw3-dev \
-            libassimp-dev
+          git clone https://github.com/emscripten-core/emsdk.git
+          cd emsdk
+          ./emsdk install latest
+          ./emsdk activate latest
 
-      - name: Configure and Build (Linux)
+      - name: Build WebAssembly
         run: |
-          # Set the PKG_CONFIG_PATH so the following pkg-config commands actually find the .pc files
-          export PKG_CONFIG_PATH=/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/share/pkgconfig
-          
-          # Use pkg-config to find paths reliably
-          GLFW_LIBS_DIR=$(pkg-config --libs-only-L glfw3 | cut -c 3-)
-          GLFW_INC_DIR=$(pkg-config --cflags-only-I glfw3 | cut -c 3-)
-          ASSIMP_LIBS_DIR=$(pkg-config --libs-only-L assimp | cut -c 3-)
-          ASSIMP_INC_DIR=$(pkg-config --cflags-only-I assimp | cut -c 3-)
+          source emsdk/emsdk_env.sh
+          mkdir -p build
+          cd build
+          emcmake cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXECUTABLE_SUFFIX=".html"
+          emmake make -j$(nproc)
 
-          cmake -S . -B build_linux -DCMAKE_BUILD_TYPE=Release -DCMAKE_VERBOSE_MAKEFILE=ON -DCMAKE_LIBRARY_PATH=$GLFW_LIBS_DIR;$ASSIMP_LIBS_DIR -DGLFW_INCLUDE_DIR=$GLFW_INC_DIR -DASSIMP_INCLUDE_DIR=$ASSIMP_INC_DIR
-          
-          cmake --build build_linux --config Release -j$(nproc)
-
-      - name: Package Linux Build
-        run: |
-          mkdir -p dist/linux
-          
-          # Find binary
-          BIN=$(find build_linux -type f -name 'OpenGL-3D-Engine' -executable | head -n1)
-          
-          if [ -z "$BIN" ]; then
-            echo "ERROR: Binary not found"
-            find build_linux -type f -executable
-            exit 1
-          fi
-          
-          echo "Found binary: $BIN"
-          cp "$BIN" dist/linux/
-          
-          # Copy assets
-          cp -r scene_models skyboxes dist/linux/
-          
-          # Create run script
-          cat > dist/linux/run.sh << 'EOF'
-          #!/bin/bash
-          cd "$(dirname "$0")"
-          ./OpenGL-3D-Engine
-          EOF
-          chmod +x dist/linux/run.sh
-          
       - name: Upload Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-pages-artifact@v3
         with:
-          name: linux-build
-          path: dist/linux/
-          
-      - name: Install Butler (Linux)
-        run: |
-          curl -L -o butler.zip https://broth.itch.ovh/butler/linux-amd64/LATEST/archive/default
-          unzip butler.zip
-          chmod +x butler
-          ./butler -V
-          
-      - name: Push to itch.io (Linux)
-        run: |
-          ./butler push dist/linux ${{ env.ITCH_USER }}/${{ env.ITCH_GAME }}:linux \
-            --userversion ${{ github.ref_name }}-${{ github.sha }}
-        env:
-          BUTLER_API_KEY: ${{ secrets.BUTLER_API_KEY }}
+          path: build/bin/Release/
 
-  # 2. WINDOWS BUILD JOB
-
-  build_windows:
-    runs-on: windows-latest
+  deploy:
+    needs: build-web
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - uses: actions/checkout@v4
-      
-      - name: Setup vcpkg
-        run: |
-          git clone https://github.com/Microsoft/vcpkg.git
-          cd vcpkg
-          .\bootstrap-vcpkg.bat
-          .\vcpkg integrate install
-          .\vcpkg install glfw3:x64-windows assimp:x64-windows --triplet x64-windows
-          
-      - name: Build (Windows)
-        run: |
-          $env:VCPKG_ROOT = "$pwd\vcpkg"
-          cmake -S . -B build_windows `
-            -G "Visual Studio 17 2022" -A x64 `
-            -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" `
-            -DVCPKG_TARGET_TRIPLET=x64-windows
-          cmake --build build_windows --config Release -- /m
-
-      - name: Package Windows Build
-        shell: bash
-        run: |
-          mkdir -p dist/windows
-          
-          # Find exe
-          EXE=$(find build_windows -type f -name 'OpenGL-3D-Engine.exe' | head -n1)
-          
-          if [ -z "$EXE" ]; then
-            echo "ERROR: Executable not found"
-            find build_windows -name "*.exe"
-            exit 1
-          fi
-          
-          echo "Found exe: $EXE"
-          cp "$EXE" dist/windows/
-          
-          # Copy DLLs
-          find "$VCPKG_ROOT/installed/x64-windows/bin" -name "*.dll" \
-            -exec cp {} dist/windows/ \; 2>/dev/null || true
-          
-          # Copy assets
-          cp -r scene_models skyboxes dist/windows/
-          
-      - name: Upload Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: windows-build
-          path: dist/windows/
-          
-      - name: Install Butler (Windows)
-        shell: powershell
-        run: |
-          Invoke-WebRequest -Uri "https://broth.itch.ovh/butler/windows-amd64/LATEST/archive/default" -OutFile "butler.zip"
-          Expand-Archive -Path "butler.zip" -DestinationPath "."
-          .\butler -V
-          
-      - name: Push to itch.io (Windows)
-        shell: powershell
-        run: |
-          .\butler push dist/windows ${{ env.ITCH_USER }}/${{ env.ITCH_GAME }}:windows --userversion ${{ github.ref_name }}-${{ github.sha }}
-        env:
-          BUTLER_API_KEY: ${{ secrets.BUTLER_API_KEY }}
-
-
-  # 3. MACOS BUILD JOB
-
-  build_macos:
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
-      
-      - name: Install Dependencies (macOS)
-        run: |
-          # Install GLFW and Assimp via Homebrew
-          brew install glfw assimp
-      
-      - name: Configure and Build (macOS)
-        run: |
-          # Build with system-installed libraries
-          cmake -S . -B build_macos \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DGLFW_LIBRARY=/opt/homebrew/lib/libglfw.dylib \
-            -DGLFW_INCLUDE_DIR=/opt/homebrew/include \
-            -DASSIMP_LIBRARY=/opt/homebrew/lib/libassimp.dylib \
-            -DASSIMP_INCLUDE_DIR=/opt/homebrew/include
-          cmake --build build_macos --config Release
-        
-      - name: Package macOS Build
-        run: |
-          set -euo pipefail
-          mkdir -p dist/macos
-          
-          # Find the macOS binary
-          BIN=$(find build_macos/bin -type f -name 'OpenGL-3D-Engine' 2>/dev/null | head -n1 || true)
-          if [ -z "$BIN" ]; then
-            BIN=$(find build_macos -type f -name 'OpenGL-3D-Engine' 2>/dev/null | head -n1 || true)
-          fi
-          
-          if [ -z "$BIN" ]; then
-            echo "ERROR: Could not find macOS binary" >&2
-            echo "Build directory contents:"
-            find build_macos -type f -perm +111 || true
-            exit 1
-          fi
-          
-          echo "Found binary at: $BIN"
-          cp "$BIN" dist/macos/OpenGL-3D-Engine 
-          
-          # Copy dynamic libraries
-          mkdir -p dist/macos/lib
-          
-          # Use otool to find dependencies, copy them, and FIX the binary's load paths
-          for lib in $(otool -L "$BIN" | grep /opt/homebrew | awk '{print $1}'); do
-            if [ -f "$lib" ]; then
-              LIB_BASENAME=$(basename "$lib")
-              cp "$lib" dist/macos/lib/"$LIB_BASENAME"
-              install_name_tool -change "$lib" @executable_path/lib/"$LIB_BASENAME" dist/macos/OpenGL-3D-Engine
-            fi
-          done
-          
-          # Copy asset folders
-          cp -r scene_models dist/macos/
-          cp -r skyboxes dist/macos/
-          
-      - name: Install Butler (macOS)
-        run: |
-          curl -L -o butler.zip https://broth.itch.ovh/butler/darwin-amd64/LATEST/archive/default
-          unzip butler.zip
-          chmod +x butler
-          ./butler -V
-          
-      - name: Push to itch.io (macOS)
-        run: |
-          ./butler push dist/macos mu-gua-here/opengl-3d-engine-demo:osx \
-            --userversion ${{ github.ref_name }}-${{ github.sha }}
-        env:
-          BUTLER_API_KEY: ${{ secrets.BUTLER_API_KEY }}
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

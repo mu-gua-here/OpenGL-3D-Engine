@@ -3,8 +3,11 @@
     "C_Cpp.default.cppStandard": "c++17",
     "C_Cpp.default.includePath": [
         "${workspaceFolder}/**",
-        "${workspaceFolder}/external/**"
+        "${workspaceFolder}/lib/**",
+        "${workspaceFolder}/include/**"
     ],
+    "C_Cpp.intelliSenseEngine": "default",
+    "C_Cpp.default.compileCommands": "${workspaceFolder}/build/compile_commands.json",
     "C_Cpp.default.macFrameworkPath": [
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/System/Library/Frameworks"
     ],

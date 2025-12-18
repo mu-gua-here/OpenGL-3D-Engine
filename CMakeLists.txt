@@ -6,6 +6,14 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+# Detect Emscripten
+if(EMSCRIPTEN)
+    message(STATUS "Building for Emscripten/WebAssembly")
+    set(CMAKE_EXECUTABLE_SUFFIX ".html")
+    set(USE_GLFW 3)
+    set(USE_WEBGL 2)
+endif()
+
 # Platform-specific settings
 if(APPLE)
     set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64" CACHE STRING "Build architectures for macOS")
@@ -25,31 +33,32 @@ else()
 endif()
 
 # Output directories
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/$<CONFIG>")
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
-
-# Multi-config support
-if(NOT CMAKE_CONFIGURATION_TYPES)
-    set(CMAKE_CONFIGURATION_TYPES "Debug;Release" CACHE STRING "" FORCE)
-endif()
-
-foreach(CONFIG ${CMAKE_CONFIGURATION_TYPES})
-    string(TOUPPER ${CONFIG} CONFIG_UPPER)
-    set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_${CONFIG_UPPER} ${CMAKE_BINARY_DIR}/bin/${CONFIG})
-endforeach()
 
 # Executable
 add_executable(${PROJECT_NAME}
     src/main.cpp
-    external/glad/src/glad.c
-    external/imgui/imgui.cpp
-    external/imgui/imgui_demo.cpp
-    external/imgui/imgui_draw.cpp
-    external/imgui/imgui_tables.cpp
-    external/imgui/imgui_widgets.cpp
-    external/imgui/imgui_impl_glfw.cpp
-    external/imgui/imgui_impl_opengl3.cpp
+    src/shader_loading.cpp
+    src/material.cpp
+    src/filesystem.cpp
+    src/skybox.cpp
+    src/camera.cpp
+    src/asset_loader.cpp
+    src/mesh_loader.cpp
+    src/light.cpp
+    src/entity_manager.cpp
+    src/renderer.cpp
+    src/shadowmap.cpp
+    lib/glad/src/glad.c
+    lib/imgui/imgui.cpp
+    lib/imgui/imgui_demo.cpp
+    lib/imgui/imgui_draw.cpp
+    lib/imgui/imgui_tables.cpp
+    lib/imgui/imgui_widgets.cpp
+    lib/imgui/imgui_impl_glfw.cpp
+    lib/imgui/imgui_impl_opengl3.cpp
 )
 
 # macOS-specific Info.plist
@@ -60,15 +69,34 @@ if(APPLE AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/Info.plist")
 endif()
 
 # Include directories
-target_include_directories(${PROJECT_NAME} PRIVATE
-    external/glad/include
-    external/glm
-    external/stb
-    external/imgui
+target_include_directories(
+    ${PROJECT_NAME} PRIVATE include/
+    lib/glad/include
+    lib/glm
+    lib/stb
+    lib/imgui
 )
 
 # Library detection and linking
-if(WIN32)
+if(EMSCRIPTEN)
+    # Emscripten/WebAssembly - Use Emscripten ports
+    message(STATUS "Configuring for Emscripten")
+    target_include_directories(${PROJECT_NAME} PRIVATE
+        lib/assimp/include
+    )
+    target_link_libraries(${PROJECT_NAME} PRIVATE
+        -sUSE_GLFW=3
+        -sUSE_WEBGL2=1
+        -sWASM=1
+        -sALLOW_MEMORY_GROWTH=1
+        -sMAXIMUM_MEMORY=1gb
+    )
+    target_compile_options(${PROJECT_NAME} PRIVATE
+        -sUSE_GLFW=3
+        -sUSE_WEBGL2=1
+    )
+    
+elseif(WIN32)
     # Windows - prefer vcpkg if available
     find_package(glfw3 CONFIG QUIET)
     find_package(assimp CONFIG QUIET)
@@ -84,12 +112,12 @@ if(WIN32)
         # Fallback to local precompiled (development only)
         message(STATUS "Using local precompiled libraries for Windows")
         target_include_directories(${PROJECT_NAME} PRIVATE
-            external/glfw/include
-            external/assimp/include
+            lib/glfw/include
+            lib/assimp/include
         )
         target_link_libraries(${PROJECT_NAME} PRIVATE
-            "${CMAKE_SOURCE_DIR}/external/glfw/glfw3.lib"
-            "${CMAKE_SOURCE_DIR}/external/assimp/assimp.lib"
+            "${CMAKE_SOURCE_DIR}/lib/glfw/glfw3.lib"
+            "${CMAKE_SOURCE_DIR}/lib/assimp/assimp.lib"
             opengl32
         )
     endif()
@@ -134,14 +162,14 @@ else()
     # Fallback to local precompiled libraries (development)
     message(STATUS "Using local precompiled libraries")
     target_include_directories(${PROJECT_NAME} PRIVATE
-        external/glfw/include
-        external/assimp/include
+        lib/glfw/include
+        lib/assimp/include
     )
     
     if(APPLE)
         target_link_libraries(${PROJECT_NAME} PRIVATE
-            "${CMAKE_SOURCE_DIR}/external/glfw/libglfw3.a"
-            "${CMAKE_SOURCE_DIR}/external/assimp/libassimp.a"
+            "${CMAKE_SOURCE_DIR}/lib/glfw/libglfw3.a"
+            "${CMAKE_SOURCE_DIR}/lib/assimp/libassimp.a"
             "-framework OpenGL"
             "-framework Cocoa"
             "-framework IOKit"
@@ -150,16 +178,16 @@ else()
         )
     elseif(WIN32)
         target_link_libraries(${PROJECT_NAME} PRIVATE
-            "${CMAKE_SOURCE_DIR}/external/glfw/glfw3.lib"
-            "${CMAKE_SOURCE_DIR}/external/assimp/assimp.lib"
+            "${CMAKE_SOURCE_DIR}/lib/glfw/glfw3.lib"
+            "${CMAKE_SOURCE_DIR}/lib/assimp/assimp.lib"
             opengl32
         )
     else()
         find_package(OpenGL REQUIRED)
         target_link_libraries(${PROJECT_NAME} PRIVATE
             OpenGL::GL
-            "${CMAKE_SOURCE_DIR}/external/glfw/libglfw3.a"
-            "${CMAKE_SOURCE_DIR}/external/assimp/libassimp.a"
+            "${CMAKE_SOURCE_DIR}/lib/glfw/libglfw3.a"
+            "${CMAKE_SOURCE_DIR}/lib/assimp/libassimp.a"
             ${CMAKE_DL_LIBS}
             pthread
         )

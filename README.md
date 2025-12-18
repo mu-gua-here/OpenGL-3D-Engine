@@ -1,4 +1,4 @@
-If you only want to test the project and not view the code I suggest you head to itch.io to run my project with ease: https://mu-gua-here.itch.io/opengl-3d-engine-demo
+If you only want to test the project and not view the code I suggest you head to GitHub pages to run my project with ease: https://mu-gua-here.github.io/OpenGL-3D-Engine/
 
 Watch my YouTube montages here: https://www.youtube.com/playlist?list=PLstnV6CWizzxmGwkcrd5LGdatt1_k0bTp
 
