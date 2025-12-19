@@ -29,6 +29,7 @@ jobs:
           cd build
           emcmake cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXECUTABLE_SUFFIX=".html"
           emmake make -j$(nproc)
+          cp bin/Release/OpenGL-3D-Engine.html bin/Release/index.html
 
       - name: Upload Artifact
         uses: actions/upload-pages-artifact@v3
