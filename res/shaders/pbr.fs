@@ -47,8 +47,8 @@ const float PI = 3.14159265359;
 
 // PARALLAX OCCLUSION MAPPING
 vec2 parallaxMapping(vec2 texCoords, vec3 viewDir) { 
-    const float minLayers = 8;
-    const float maxLayers = 64;
+    const float minLayers = 8.0;
+    const float maxLayers = 64.0;
     float numLayers = mix(maxLayers, minLayers, abs(dot(vec3(0.0, 0.0, 1.0), viewDir)));
     // Calculate the size of each layer
     float layerDepth = 1.0 / numLayers;

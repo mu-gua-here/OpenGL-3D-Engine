@@ -64,12 +64,6 @@
 #include <cmath>
 #include <cstdio>
 
-// Filesystem access
-#include <filesystem>
-#ifdef __APPLE__
-    #include <mach-o/dyld.h>
-#endif
-
 // GLM library
 #define GLM_ENABLE_EXPERIMENTAL
 #include <glm/glm.hpp>
@@ -350,6 +344,10 @@ void emscripten_main_loop_callback() {
         view = camera_get_view_matrix(&global_camera);
         projection = camera_get_projection(&global_camera);
         
+        // ============================================================================
+        // UPDATE ENTITIES
+        // ============================================================================
+
         entity_manager.updateEntity("cube", VEC3_NO_CHANGE, glm::vec3(update_count * 0.1f, update_count * 0.1f, update_count * 0.1f), VEC3_NO_CHANGE);
         entity_manager.updateEntity("sphere", glm::vec3(NAN, 2.5f + sinf(update_count * 0.01f), NAN), glm::vec3(update_count, 0, 0), VEC3_NO_CHANGE);
         entity_manager.updateEntity("statue", VEC3_NO_CHANGE, glm::vec3(NAN, update_count, NAN), VEC3_NO_CHANGE);
@@ -627,38 +625,17 @@ int main() {
     // because blocking file I/O will freeze the browser
     printf("Loading meshes...\n");
     
-    auto level_mesh = loadMesh("level/level.obj");
-    if (level_mesh.empty()) printf("Warning: Failed to load level mesh\n");
-    
-    auto tree_mesh = loadMesh("realistic_tree/tree.obj");
-    if (tree_mesh.empty()) printf("Warning: Failed to load tree mesh\n");
-    
-    auto instructions_mesh = loadMesh("instructions_panel/quad.obj");
-    if (instructions_mesh.empty()) printf("Warning: Failed to load instructions mesh\n");
-    
-    auto cube_mesh = loadMesh("cube/cube.obj");
-    if (cube_mesh.empty()) printf("Warning: Failed to load cube mesh\n");
-    
-    auto sphere_mesh = loadMesh("sphere/sphere.obj");
-    if (sphere_mesh.empty()) printf("Warning: Failed to load sphere mesh\n");
-    
+    auto level_mesh = loadMesh("level/level.obj");    
+    auto tree_mesh = loadMesh("realistic_tree/tree.obj");    
+    auto instructions_mesh = loadMesh("instructions_panel/quad.obj");    
+    auto cube_mesh = loadMesh("cube/cube.obj");    
+    auto sphere_mesh = loadMesh("sphere/sphere.obj");    
     auto streetlight_mesh = loadMesh("streetlight/streetlight.obj");
-    if (streetlight_mesh.empty()) printf("Warning: Failed to load streetlight mesh\n");
-    
     auto cone_mesh = loadMesh("cone/cone.obj");
-    if (cone_mesh.empty()) printf("Warning: Failed to load cone mesh\n");
-    
     auto statue_mesh = loadMesh("statue/statue_of_myself.obj");
-    if (statue_mesh.empty()) printf("Warning: Failed to load statue mesh\n");
-    
-    auto plastic_table = loadMesh("plastic_table/plastic_table.obj");
-    if (plastic_table.empty()) printf("Warning: Failed to load plastic table mesh\n");
-    
+    auto plastic_table = loadMesh("plastic_table/plastic_table.obj");    
     auto road_mesh = loadMesh("modular_road/modular_road_pack.obj");
-    if (road_mesh.empty()) printf("Warning: Failed to load road mesh\n");
-    
     auto character_idle = loadMesh("characters3d.com - Idle.fbx");
-    if (character_idle.empty()) printf("Warning: Failed to load character mesh\n");
     
     printf("Meshes loaded successfully!\n");
     
