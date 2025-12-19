@@ -16,6 +16,8 @@
 #include "stb_image.h"
 
 #ifndef __EMSCRIPTEN__
+
+unsigned char* load_greyscale_data(const std::string& path, const aiScene* scene, int& width, int& height) {
     if (!path.empty() && path[0] == '*') {
         int texIndex = std::atoi(path.c_str() + 1);
         if (texIndex >= 0 && texIndex < (int)scene->mNumTextures) {
