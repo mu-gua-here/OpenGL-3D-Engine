@@ -2,16 +2,20 @@
 #include "filesystem.h"
 #include "asset_loader.h"
 #include "material.h"
+
+#ifndef __EMSCRIPTEN__
 #include <assimp/Importer.hpp>
 #include <assimp/scene.h>
 #include <assimp/postprocess.h>
+#endif
+
 #include <algorithm>
 #include <functional>
 #include <cstdio>
 
 #include "stb_image.h"
 
-unsigned char* load_greyscale_data(const std::string& path, const aiScene* scene, int& width, int& height) {
+#ifndef __EMSCRIPTEN__
     if (!path.empty() && path[0] == '*') {
         int texIndex = std::atoi(path.c_str() + 1);
         if (texIndex >= 0 && texIndex < (int)scene->mNumTextures) {
@@ -384,3 +388,11 @@ std::vector<std::unique_ptr<Mesh>> loadMesh(const std::string& filepath) {
 
     return meshes;
 }
+
+#else
+// Stub implementation for Emscripten (no assimp support on web)
+std::vector<std::unique_ptr<Mesh>> loadMesh(const std::string& filepath) {
+    printf("Warning: Mesh loading not supported on web platform (%s)\n", filepath.c_str());
+    return {};
+}
+#endif
