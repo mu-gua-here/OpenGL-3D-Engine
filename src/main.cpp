@@ -79,25 +79,8 @@
 #include <glm/gtx/string_cast.hpp>
 #include <glm/gtx/euler_angles.hpp>
 
-// Platform-specific includes for executable path
-#ifdef _WIN32
-    #include <windows.h>
-    #ifndef MAX_PATH
-        #define MAX_PATH 260
-    #endif
-#elif __linux__
-    #include <unistd.h>
-    #include <linux/limits.h>
-    #ifndef PATH_MAX
-        #define PATH_MAX 4096
-    #endif
-#elif __APPLE__
-    // mach-o/dyld.h already included
-    #include <limits.h>
-    #ifndef PATH_MAX
-        #define PATH_MAX 4096
-    #endif
-#elif __EMSCRIPTEN__
+// Emscripten
+#ifdef __EMSCRIPTEN__
     #include <emscripten.h>
     #include <emscripten/html5.h>
 #endif
