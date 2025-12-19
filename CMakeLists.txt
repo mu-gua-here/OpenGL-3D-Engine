@@ -84,12 +84,19 @@ if(EMSCRIPTEN)
     target_include_directories(${PROJECT_NAME} PRIVATE
         lib/assimp/include
     )
+    
+    # Add asset preloading for web
+    set(PRELOAD_FLAGS "")
+    list(APPEND PRELOAD_FLAGS "--preload-file=${CMAKE_SOURCE_DIR}/res/shaders@/res/shaders")
+    list(APPEND PRELOAD_FLAGS "--preload-file=${CMAKE_SOURCE_DIR}/res/skyboxes@/res/skyboxes")
+    
     target_link_libraries(${PROJECT_NAME} PRIVATE
         -sUSE_GLFW=3
         -sUSE_WEBGL2=1
         -sWASM=1
         -sALLOW_MEMORY_GROWTH=1
         -sMAXIMUM_MEMORY=1gb
+        ${PRELOAD_FLAGS}
     )
     target_compile_options(${PROJECT_NAME} PRIVATE
         -sUSE_GLFW=3
