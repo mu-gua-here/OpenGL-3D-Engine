@@ -89,6 +89,7 @@ if(EMSCRIPTEN)
     set(PRELOAD_FLAGS "")
     list(APPEND PRELOAD_FLAGS "--preload-file=${CMAKE_SOURCE_DIR}/res/shaders@/res/shaders")
     list(APPEND PRELOAD_FLAGS "--preload-file=${CMAKE_SOURCE_DIR}/res/skyboxes@/res/skyboxes")
+    list(APPEND PRELOAD_FLAGS "--preload-file=${CMAKE_SOURCE_DIR}/res/scene_models@/res/scene_models")
     
     target_link_libraries(${PROJECT_NAME} PRIVATE
         -sUSE_GLFW=3
