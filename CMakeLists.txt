@@ -97,6 +97,7 @@ if(EMSCRIPTEN)
         -sWASM=1
         -sALLOW_MEMORY_GROWTH=1
         -sMAXIMUM_MEMORY=1gb
+        --shell-file=${CMAKE_SOURCE_DIR}/shell_minimal.html
         ${PRELOAD_FLAGS}
     )
     target_compile_options(${PROJECT_NAME} PRIVATE
