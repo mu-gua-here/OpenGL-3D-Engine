@@ -7,5 +7,8 @@ build*/
 *.o
 *.out
 
+# Emscripten SDK (large, system-specific)
+emsdk/
+
 # Xcode-specific files to ignore
 *.xcodeproj/xcuserdata/

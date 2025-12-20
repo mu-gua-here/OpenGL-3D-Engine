@@ -185,7 +185,6 @@ class Renderer;
 struct AppContext {
     GLFWwindow* window = nullptr;
     std::unique_ptr<Renderer> renderer;
-    Skybox skybox;
     bool should_close = false;
 };
 
@@ -681,11 +680,18 @@ int main() {
     // ============================================================================
     
     // Create app context (used by both native and web)
-    AppContext app_ctx;
-    app_ctx.window = window;
-    app_ctx.renderer = std::move(renderer);
-    // Don't move skybox - just reference it
-    g_app_context = &app_ctx;
+    // IMPORTANT: Use dynamic allocation on Emscripten because the callback
+    // will be called after main() returns, so local stack variables would be invalid
+    #ifdef __EMSCRIPTEN__
+        g_app_context = new AppContext();
+        g_app_context->window = window;
+        g_app_context->renderer = std::move(renderer);
+    #else
+        AppContext app_ctx;
+        app_ctx.window = window;
+        app_ctx.renderer = std::move(renderer);
+        g_app_context = &app_ctx;
+    #endif
     
     #ifdef __EMSCRIPTEN__
     // Set Emscripten main loop with 60 FPS target
@@ -701,6 +707,9 @@ int main() {
     // CLEANUP
     // ============================================================================
     
+    // On Emscripten, this code never executes because emscripten_set_main_loop
+    // takes over the event loop. The browser runtime manages cleanup.
+    #ifndef __EMSCRIPTEN__
     printf("Cleaning up...\n");
     skybox.cleanup();
     
@@ -710,11 +719,9 @@ int main() {
     }
 
     // Cleanup GPU timers
-    #ifndef __EMSCRIPTEN__
-        glDeleteQueries(2, shadowQueries);
-        glDeleteQueries(2, mainQueries);
-        glDeleteQueries(2, skyboxQueries);
-    #endif
+    glDeleteQueries(2, shadowQueries);
+    glDeleteQueries(2, mainQueries);
+    glDeleteQueries(2, skyboxQueries);
     
     cleanupShadowMap();
     
@@ -725,6 +732,8 @@ int main() {
     
     glfwDestroyWindow(window);
     glfwTerminate();
+    #endif
+    
     return 0;
 }
 

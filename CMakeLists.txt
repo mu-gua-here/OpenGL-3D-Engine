@@ -87,9 +87,12 @@ if(EMSCRIPTEN)
     
     # Add asset preloading for web
     set(PRELOAD_FLAGS "")
-    list(APPEND PRELOAD_FLAGS "--preload-file=${CMAKE_SOURCE_DIR}/res/shaders@/res/shaders")
-    list(APPEND PRELOAD_FLAGS "--preload-file=${CMAKE_SOURCE_DIR}/res/skyboxes@/res/skyboxes")
-    list(APPEND PRELOAD_FLAGS "--preload-file=${CMAKE_SOURCE_DIR}/res/scene_models@/res/scene_models")
+    list(APPEND PRELOAD_FLAGS "--preload-file=../res/shaders@/res/shaders")
+    list(APPEND PRELOAD_FLAGS "--preload-file=../res/skyboxes@/res/skyboxes")
+    list(APPEND PRELOAD_FLAGS "--preload-file=../res/scene_models@/res/scene_models")
+    
+    # Shell file using relative path to avoid space issues
+    set(SHELL_FILE_FLAG "--shell-file=../shell_minimal.html")
     
     target_link_libraries(${PROJECT_NAME} PRIVATE
         -sUSE_GLFW=3
@@ -97,7 +100,7 @@ if(EMSCRIPTEN)
         -sWASM=1
         -sALLOW_MEMORY_GROWTH=1
         -sMAXIMUM_MEMORY=1gb
-        --shell-file=${CMAKE_SOURCE_DIR}/shell_minimal.html
+        ${SHELL_FILE_FLAG}
         ${PRELOAD_FLAGS}
     )
     target_compile_options(${PROJECT_NAME} PRIVATE
