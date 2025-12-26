@@ -440,15 +440,17 @@ void emscripten_main_loop_callback() {
     ImGui::End();
 
     if (glfwGetInputMode(window, GLFW_CURSOR) == GLFW_CURSOR_NORMAL && !ImGui::GetIO().WantCaptureMouse) {
-        if (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT)) {
+        if (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS) {
             firstMouse = true;
-            glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+            // Only set cursor mode, don't force disable immediately on web
+            #ifdef __EMSCRIPTEN__
+                // On web, this will trigger a pointer lock request which requires user gesture
+                // The click itself provides the gesture
+                glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+            #else
+                glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+            #endif
             paused = false;
-        }
-    } else {
-        if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS) {
-            glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
-            paused = true;
         }
     }
     
@@ -521,8 +523,10 @@ int main() {
     }
     glfwMakeContextCurrent(window);
     
-    // Turn V-Sync off
-    glfwSwapInterval(0);
+    // Turn V-Sync off (not supported in Emscripten before main loop)
+    #ifndef __EMSCRIPTEN__
+        glfwSwapInterval(0);
+    #endif
     
     if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress)) {
         printf("Failed to initialize GLAD\n");
@@ -531,14 +535,24 @@ int main() {
     
     printf("OpenGL Version: %s\n", glGetString(GL_VERSION));
     
-    // Set up ImGui
-    IMGUI_CHECKVERSION();
-    std::remove("imgui.ini"); // Reset GUI menu state
-    ImGui::CreateContext();
-    ImGuiIO& io = ImGui::GetIO(); (void)io;
-    ImGui::StyleColorsDark();
-    ImGui_ImplGlfw_InitForOpenGL(window, true);
-    ImGui_ImplOpenGL3_Init("#version 330");
+    #ifndef __EMSCRIPTEN__
+        // Set up ImGui
+        IMGUI_CHECKVERSION();
+        std::remove("imgui.ini"); // Reset GUI menu state
+        ImGui::CreateContext();
+        ImGuiIO& io = ImGui::GetIO(); (void)io;
+        ImGui::StyleColorsDark();
+        ImGui_ImplGlfw_InitForOpenGL(window, true);
+        ImGui_ImplOpenGL3_Init("#version 330");
+    #else
+        // ImGui setup for Emscripten
+        IMGUI_CHECKVERSION();
+        ImGui::CreateContext();
+        ImGuiIO& io = ImGui::GetIO(); (void)io;
+        ImGui::StyleColorsDark();
+        ImGui_ImplGlfw_InitForOpenGL(window, true);
+        ImGui_ImplOpenGL3_Init("#version 300 es");
+    #endif
     
     // Set callbacks
     glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
@@ -579,7 +593,11 @@ int main() {
     // OpenGL pixel functions
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    glEnable(GL_MULTISAMPLE);
+
+    // On web, multisampling cannot be toggled on or off at runtime
+    #ifndef __EMSCRIPTEN__
+        glEnable(GL_MULTISAMPLE);
+    #endif
     
     // ============================================================================
     // LOAD ASSETS
@@ -593,9 +611,13 @@ int main() {
     
     // Initialise skybox
     skyboxID = 0;
-    Skybox skybox;
-    skybox.initShader();
-    g_skybox = &skybox;  // Set global skybox pointer
+    #ifdef __EMSCRIPTEN__
+        g_skybox = new Skybox();
+    #else
+        static Skybox skybox;
+        g_skybox = &skybox;
+    #endif
+    g_skybox->initShader();
     
     // Cloud skybox
     std::string cloud_skybox_paths[6] = {
@@ -616,12 +638,10 @@ int main() {
         cloud_skybox_paths[5].c_str()
     };
     
-    skybox.bindSkybox(cloud_skybox);
+    g_skybox->bindSkybox(cloud_skybox);
     
     // LOAD OBJ MESHES //
-    
-    // Note: On Emscripten/Web, asset loading must be handled carefully
-    // because blocking file I/O will freeze the browser
+
     printf("Loading meshes...\n");
     
     auto level_mesh = loadMesh("level/level.obj");    
@@ -636,7 +656,7 @@ int main() {
     auto road_mesh = loadMesh("modular_road/modular_road_pack.obj");
     auto character_idle = loadMesh("characters3d.com - Idle.fbx");
     
-    printf("Meshes loaded successfully!\n");
+    printf("Meshes finished loading!\n");
     
     // ============================================================================
     // CREATE SCENE OBJECTS
@@ -653,6 +673,7 @@ int main() {
     
     // Initialise shadow map
     initShadowMap();
+    printf("Shadow map initialized successfully!\n");
 
     // CREATE ENTITIES //
     
@@ -680,8 +701,6 @@ int main() {
     // ============================================================================
     
     // Create app context (used by both native and web)
-    // IMPORTANT: Use dynamic allocation on Emscripten because the callback
-    // will be called after main() returns, so local stack variables would be invalid
     #ifdef __EMSCRIPTEN__
         g_app_context = new AppContext();
         g_app_context->window = window;
@@ -694,8 +713,8 @@ int main() {
     #endif
     
     #ifdef __EMSCRIPTEN__
-    // Set Emscripten main loop with 60 FPS target
-    emscripten_set_main_loop(emscripten_main_loop_callback, 60, 1);
+        // Set Emscripten main loop but let browser handle the frame rate
+        emscripten_set_main_loop(emscripten_main_loop_callback, 0, 1);
     #else
     // Native platform - traditional while loop
     while (!glfwWindowShouldClose(window)) {
@@ -707,8 +726,6 @@ int main() {
     // CLEANUP
     // ============================================================================
     
-    // On Emscripten, this code never executes because emscripten_set_main_loop
-    // takes over the event loop. The browser runtime manages cleanup.
     #ifndef __EMSCRIPTEN__
     printf("Cleaning up...\n");
     skybox.cleanup();

@@ -34,7 +34,6 @@ std::string loadShaderFile(const std::string& path) {
         version_string = "#version 300 es\n"
                         "precision mediump float;\n"
                         "precision lowp sampler2D;\n"
-                        "precision lowp sampler2DShadow;\n"
                         "precision lowp samplerCube;\n";
     #else
         version_string = "#version 330 core\n";

@@ -1,4 +1,16 @@
 cmake_minimum_required(VERSION 3.16)
+
+# EMSCRIPTEN DETECTION - MUST BE BEFORE project()
+
+if(DEFINED ENV{EMSCRIPTEN})
+    set(EMSCRIPTEN TRUE)
+    message(STATUS "Detected Emscripten build environment")
+    # Clear macOS-specific settings
+    set(CMAKE_OSX_ARCHITECTURES "" CACHE STRING "" FORCE)
+    set(CMAKE_OSX_DEPLOYMENT_TARGET "" CACHE STRING "" FORCE)
+    set(CMAKE_OSX_SYSROOT "" CACHE STRING "" FORCE)
+endif()
+
 project(OpenGL-3D-Engine VERSION 0.0.0 LANGUAGES C CXX)
 
 # Basic settings
@@ -6,19 +18,19 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-# Detect Emscripten
+# Detect Emscripten again after project() for use in rest of file
 if(EMSCRIPTEN)
     message(STATUS "Building for Emscripten/WebAssembly")
     set(CMAKE_EXECUTABLE_SUFFIX ".html")
-    set(USE_GLFW 3)
-    set(USE_WEBGL 2)
 endif()
 
-# Platform-specific settings
-if(APPLE)
+# Platform-specific settings (only for native builds)
+if(APPLE AND NOT EMSCRIPTEN)
     set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64" CACHE STRING "Build architectures for macOS")
     add_compile_options(-Wno-deprecated-declarations)
+    add_compile_options(-Wno-deprecated-non-prototype)
     add_definitions(-DGL_SILENCE_DEPRECATION)
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wno-deprecated-non-prototype")
 endif()
 
 # Compiler flags
@@ -27,7 +39,7 @@ if(MSVC)
     set(CMAKE_CXX_FLAGS_RELEASE "/O2 /DNDEBUG")
     add_definitions(-D_USE_MATH_DEFINES -DNOMINMAX)
     add_compile_options(/wd4244 /wd4005 /W3)
-else()
+elseif(NOT EMSCRIPTEN)
     set(CMAKE_CXX_FLAGS_DEBUG "-g -O0 -Wall -Wextra")
     set(CMAKE_CXX_FLAGS_RELEASE "-O3 -DNDEBUG")
 endif()
@@ -37,7 +49,10 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/$<CONFIG>")
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
 
-# Executable
+# ============================================================================
+# EXECUTABLE
+# ============================================================================
+
 add_executable(${PROJECT_NAME}
     src/main.cpp
     src/shader_loading.cpp
@@ -70,19 +85,23 @@ endif()
 
 # Include directories
 target_include_directories(
-    ${PROJECT_NAME} PRIVATE include/
+    ${PROJECT_NAME} PRIVATE 
+    include/
     lib/glad/include
     lib/glm
     lib/stb
     lib/imgui
 )
 
-# Library detection and linking
+# ============================================================================
+# LIBRARY DETECTION AND LINKING
+# ============================================================================
+
 if(EMSCRIPTEN)
-    # Emscripten/WebAssembly - Use Emscripten ports
+    # Emscripten/WebAssembly - Use Emscripten ports and vendored Assimp
     message(STATUS "Configuring for Emscripten")
     target_include_directories(${PROJECT_NAME} PRIVATE
-        lib/assimp/include
+        "${CMAKE_SOURCE_DIR}/lib/assimp/include"
     )
     
     # Add asset preloading for web
@@ -94,112 +113,128 @@ if(EMSCRIPTEN)
     # Shell file using relative path to avoid space issues
     set(SHELL_FILE_FLAG "--shell-file=../shell_minimal.html")
     
+    target_compile_options(${PROJECT_NAME} PRIVATE -O3) 
+
     target_link_libraries(${PROJECT_NAME} PRIVATE
+        "${CMAKE_SOURCE_DIR}/lib/assimp/libassimp_wasm.a"
         -sUSE_GLFW=3
         -sUSE_WEBGL2=1
+        -sUSE_ZLIB=1
         -sWASM=1
         -sALLOW_MEMORY_GROWTH=1
         -sMAXIMUM_MEMORY=1gb
         ${SHELL_FILE_FLAG}
         ${PRELOAD_FLAGS}
     )
-    target_compile_options(${PROJECT_NAME} PRIVATE
-        -sUSE_GLFW=3
-        -sUSE_WEBGL2=1
-    )
+
+else()
+    # Native platforms - Try system libraries first, fallback to FetchContent
+    message(STATUS "Configuring for native platform")
     
-elseif(WIN32)
-    # Windows - prefer vcpkg if available
-    find_package(glfw3 CONFIG QUIET)
-    find_package(assimp CONFIG QUIET)
+    set(USING_SYSTEM_LIBS FALSE)
     
-    if(glfw3_FOUND AND assimp_FOUND)
-        message(STATUS "Using vcpkg/system libraries for Windows")
+    # Try to find system libraries
+    find_package(PkgConfig QUIET)
+    if(PKG_CONFIG_FOUND)
+        pkg_check_modules(ASSIMP QUIET assimp)
+        pkg_check_modules(GLFW QUIET glfw3)
+    endif()
+    
+    # Also try CMake's find_package (for vcpkg/Homebrew)
+    if(NOT ASSIMP_FOUND)
+        find_package(assimp QUIET)
+        if(assimp_FOUND)
+            set(ASSIMP_FOUND TRUE)
+        endif()
+    endif()
+    
+    if(NOT GLFW_FOUND)
+        find_package(glfw3 QUIET)
+        if(glfw3_FOUND)
+            set(GLFW_FOUND TRUE)
+        endif()
+    endif()
+    
+    # Check if we have both system libraries
+    if(ASSIMP_FOUND AND GLFW_FOUND)
+        set(USING_SYSTEM_LIBS TRUE)
+        message(STATUS "✓ Using system libraries (Homebrew/vcpkg)")
+    else()
+        message(STATUS "✓ System libraries not found, will fetch from source")
+    endif()
+    
+    # Now link or fetch based on what we found
+    if(USING_SYSTEM_LIBS)
+        # Use system libraries
+        if(TARGET assimp::assimp)
+            target_link_libraries(${PROJECT_NAME} PRIVATE assimp::assimp)
+        elseif(ASSIMP_LIBRARIES)
+            target_include_directories(${PROJECT_NAME} PRIVATE ${ASSIMP_INCLUDE_DIRS})
+            target_link_libraries(${PROJECT_NAME} PRIVATE ${ASSIMP_LIBRARIES})
+        endif()
+        
+        if(TARGET glfw)
+            target_link_libraries(${PROJECT_NAME} PRIVATE glfw)
+        elseif(GLFW_LIBRARIES)
+            target_include_directories(${PROJECT_NAME} PRIVATE ${GLFW_INCLUDE_DIRS})
+            target_link_libraries(${PROJECT_NAME} PRIVATE ${GLFW_LIBRARIES})
+        endif()
+        
+    else()
+        # Fetch from source
+        include(FetchContent)
+        
+        message(STATUS "Fetching GLFW...")
+        FetchContent_Declare(
+            glfw
+            GIT_REPOSITORY https://github.com/glfw/glfw.git
+            GIT_TAG 3.3.8
+            GIT_SHALLOW TRUE
+        )
+        set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
+        set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+        set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+        set(GLFW_INSTALL OFF CACHE BOOL "" FORCE)
+        FetchContent_MakeAvailable(glfw)
+        
+        message(STATUS "Fetching Assimp...")
+        FetchContent_Declare(
+            assimp
+            GIT_REPOSITORY https://github.com/assimp/assimp.git
+            GIT_TAG v5.4.3
+            GIT_SHALLOW TRUE
+        )
+        set(ASSIMP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+        set(ASSIMP_BUILD_ASSIMP_TOOLS OFF CACHE BOOL "" FORCE)
+        set(ASSIMP_INSTALL OFF CACHE BOOL "" FORCE)
+        set(ASSIMP_NO_EXPORT ON CACHE BOOL "" FORCE)
+        set(ASSIMP_BUILD_ALL_IMPORTERS_BY_DEFAULT OFF CACHE BOOL "" FORCE)
+        set(ASSIMP_BUILD_OBJ_IMPORTER ON CACHE BOOL "" FORCE)
+        set(ASSIMP_BUILD_FBX_IMPORTER ON CACHE BOOL "" FORCE)
+        set(ASSIMP_BUILD_GLTF_IMPORTER ON CACHE BOOL "" FORCE)
+        set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+        FetchContent_MakeAvailable(assimp)
+        
         target_link_libraries(${PROJECT_NAME} PRIVATE
             glfw
-            assimp::assimp
-            opengl32
-        )
-    else()
-        # Fallback to local precompiled (development only)
-        message(STATUS "Using local precompiled libraries for Windows")
-        target_include_directories(${PROJECT_NAME} PRIVATE
-            lib/glfw/include
-            lib/assimp/include
-        )
-        target_link_libraries(${PROJECT_NAME} PRIVATE
-            "${CMAKE_SOURCE_DIR}/lib/glfw/glfw3.lib"
-            "${CMAKE_SOURCE_DIR}/lib/assimp/assimp.lib"
-            opengl32
+            assimp
         )
     endif()
     
-elseif(APPLE AND GLFW_LIBRARY AND ASSIMP_LIBRARY)
-    # macOS with Homebrew (CI build)
-    message(STATUS "Using Homebrew libraries for macOS CI")
-    target_include_directories(${PROJECT_NAME} PRIVATE
-        ${GLFW_INCLUDE_DIR}
-        ${ASSIMP_INCLUDE_DIR}
-    )
-    
-    target_link_libraries(${PROJECT_NAME} PRIVATE
-        ${GLFW_LIBRARY}
-        ${ASSIMP_LIBRARY}
-        "-framework OpenGL"
-        "-framework Cocoa"
-        "-framework IOKit"
-        "-framework CoreVideo"
-    )
-    
-elseif(UNIX AND NOT APPLE)
-    # Linux CI Build - Use explicit paths passed via the YAML script's -D flags
-    find_package(OpenGL REQUIRED)
-
-    message(STATUS "Manually linking system libraries for Linux via YAML passed variables")
-    
-    target_include_directories(${PROJECT_NAME} PRIVATE
-        ${GLFW_INCLUDE_DIR}
-        ${ASSIMP_INCLUDE_DIR}
-    )
-
-    target_link_libraries(${PROJECT_NAME} PRIVATE
-        OpenGL::GL
-        glfw
-        assimp
-        ${CMAKE_DL_LIBS}
-        pthread
-    )
-    
-else()
-    # Fallback to local precompiled libraries (development)
-    message(STATUS "Using local precompiled libraries")
-    target_include_directories(${PROJECT_NAME} PRIVATE
-        lib/glfw/include
-        lib/assimp/include
-    )
-    
+    # Platform-specific system libraries
     if(APPLE)
         target_link_libraries(${PROJECT_NAME} PRIVATE
-            "${CMAKE_SOURCE_DIR}/lib/glfw/libglfw3.a"
-            "${CMAKE_SOURCE_DIR}/lib/assimp/libassimp.a"
             "-framework OpenGL"
             "-framework Cocoa"
             "-framework IOKit"
             "-framework CoreVideo"
-            "-lz"
         )
     elseif(WIN32)
-        target_link_libraries(${PROJECT_NAME} PRIVATE
-            "${CMAKE_SOURCE_DIR}/lib/glfw/glfw3.lib"
-            "${CMAKE_SOURCE_DIR}/lib/assimp/assimp.lib"
-            opengl32
-        )
+        target_link_libraries(${PROJECT_NAME} PRIVATE opengl32)
     else()
         find_package(OpenGL REQUIRED)
-        target_link_libraries(${PROJECT_NAME} PRIVATE
+        target_link_libraries(${PROJECT_NAME} PRIVATE 
             OpenGL::GL
-            "${CMAKE_SOURCE_DIR}/lib/glfw/libglfw3.a"
-            "${CMAKE_SOURCE_DIR}/lib/assimp/libassimp.a"
             ${CMAKE_DL_LIBS}
             pthread
         )

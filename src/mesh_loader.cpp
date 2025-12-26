@@ -3,19 +3,15 @@
 #include "asset_loader.h"
 #include "material.h"
 
-#ifndef __EMSCRIPTEN__
 #include <assimp/Importer.hpp>
 #include <assimp/scene.h>
 #include <assimp/postprocess.h>
-#endif
 
 #include <algorithm>
 #include <functional>
 #include <cstdio>
 
 #include "stb_image.h"
-
-#ifndef __EMSCRIPTEN__
 
 unsigned char* load_greyscale_data(const std::string& path, const aiScene* scene, int& width, int& height) {
     if (!path.empty() && path[0] == '*') {
@@ -390,11 +386,3 @@ std::vector<std::unique_ptr<Mesh>> loadMesh(const std::string& filepath) {
 
     return meshes;
 }
-
-#else
-// Stub implementation for Emscripten (no assimp support on web)
-std::vector<std::unique_ptr<Mesh>> loadMesh(const std::string& filepath) {
-    printf("Warning: Mesh loading not supported on web platform (%s)\n", filepath.c_str());
-    return {};
-}
-#endif

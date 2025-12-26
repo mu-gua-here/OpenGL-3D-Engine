@@ -12,7 +12,7 @@ uniform sampler2D albedoMap;
 uniform sampler2D normalMap;
 uniform sampler2D ormMap;
 uniform sampler2D emissiveMap;
-uniform sampler2DShadow shadowMap;
+uniform sampler2D shadowMap;
 
 // Material scalar properties
 uniform vec3 baseColor;
@@ -82,9 +82,7 @@ vec2 parallaxMapping(vec2 texCoords, vec3 viewDir) {
 float calcShadow(vec4 fragLight, vec3 N, vec3 L) {
     if (shadowLightIndex < 0) return 0.0;
 
-    // Apply normal offset before projection to prevent acne
     vec3 offsetPos = FragPos + N * 0.1;
-
     vec4 offsetLight = lightSpaceMatrix * vec4(offsetPos, 1.0);
     
     vec3 proj = offsetLight.xyz / offsetLight.w;
@@ -92,11 +90,9 @@ float calcShadow(vec4 fragLight, vec3 N, vec3 L) {
 
     if (proj.z > 1.0) return 0.0;
 
-    // Minimal bias needed since we use normal offset
     float cosTheta = max(dot(N, L), 0.0);
     float bias = 0.0001 * (1.0 - cosTheta);
 
-    // Poisson disk sampling offsets
     vec2 poissonDisk[16] = vec2[](
         vec2(-0.94201624, -0.39906216),
         vec2(0.94558609, -0.76890725),
@@ -116,26 +112,23 @@ float calcShadow(vec4 fragLight, vec3 N, vec3 L) {
         vec2(0.14383161, -0.14100790)
     );
 
-    // PCF sampling with Poisson disk distribution
     float shadow = 0.0;
     vec2 texelSize = 1.0 / vec2(textureSize(shadowMap, 0));
-    
-    // Adjust the multiplier to control shadow softness (higher = softer)
     float spread = 2.0;
     
     for (int i = 0; i < 16; ++i) {
         vec2 offset = poissonDisk[i] * texelSize * spread;
-        float shadowSample = texture(shadowMap, vec3(proj.xy + offset, proj.z - bias));
-        shadow += shadowSample; // Returns 0.0 (in shadow) or 1.0 (lit)
+        // WebGL-compatible depth comparison
+        float depth = texture(shadowMap, proj.xy + offset).r;
+        shadow += (depth >= (proj.z - bias)) ? 1.0 : 0.0;
     }
     shadow /= 16.0;
 
-    // Fade shadows at edges
     vec2 border = min(proj.xy, 1.0 - proj.xy);
     float fade = smoothstep(0.0, 0.1, min(border.x, border.y));
     
-    // Invert because sampler2DShadow returns 1.0 for lit, 0.0 for shadow
-    return mix(0.0, 1.0 - shadow, fade);
+    // Already returns correct value (1.0 = lit, 0.0 = shadow)
+    return mix(1.0, shadow, fade);
 }
 
 // PBR FUNCTIONS
@@ -272,7 +265,7 @@ void main() {
         float shadow = (i == shadowLightIndex) ? calcShadow(FragPosLightSpace, N, L) : 0.0;
         
         float NdotL = max(dot(N, L), 0.0);
-        Lo += (kD * albedo / PI + specular) * radiance * NdotL * (1.0 - shadow);
+        Lo += (kD * albedo / PI + specular) * radiance * NdotL * shadow;
     }
     
     // Ambient lighting with AO
