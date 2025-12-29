@@ -111,7 +111,7 @@ if(EMSCRIPTEN)
     list(APPEND PRELOAD_FLAGS "--preload-file=../res/scene_models@/res/scene_models")
     
     # Shell file using relative path to avoid space issues
-    set(SHELL_FILE_FLAG "--shell-file=../shell_minimal.html")
+    set(SHELL_FILE_FLAG "--shell-file=../index.html")
     
     target_compile_options(${PROJECT_NAME} PRIVATE -O3) 
 
