@@ -11,7 +11,7 @@ if(DEFINED ENV{EMSCRIPTEN})
     set(CMAKE_OSX_SYSROOT "" CACHE STRING "" FORCE)
 endif()
 
-project(OpenGL-3D-Engine VERSION 0.0.0 LANGUAGES C CXX)
+project(OpenGL-3D-Engine LANGUAGES C CXX)
 
 # Basic settings
 set(CMAKE_CXX_STANDARD 17)
