@@ -1,0 +1,103 @@
+name: Deploy Engine to GitHub Pages
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:  # Allow manual trigger
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  build-web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Emscripten
+        run: |
+          git clone https://github.com/emscripten-core/emsdk.git
+          cd emsdk
+          ./emsdk install latest
+          ./emsdk activate latest
+
+      - name: Build WebAssembly
+        run: |
+          source emsdk/emsdk_env.sh
+          mkdir -p build
+          cd build
+          emcmake cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXECUTABLE_SUFFIX=".html"
+          emmake make -j$(nproc)
+
+      - name: Prepare deployment directory
+        run: |
+          mkdir -p deploy
+          
+          # Find the actual build output directory
+          BUILD_DIR=""
+          if [ -d "build/bin/Release" ]; then
+            BUILD_DIR="build/bin/Release"
+          elif [ -d "build/bin" ]; then
+            BUILD_DIR="build/bin"
+          elif [ -d "build" ]; then
+            BUILD_DIR="build"
+          fi
+          
+          echo "Found build directory: $BUILD_DIR"
+          ls -lh "$BUILD_DIR"
+          
+          # Copy all build artifacts
+          cp "$BUILD_DIR"/*.html deploy/ 2>/dev/null || echo "No HTML files"
+          cp "$BUILD_DIR"/*.js deploy/ 2>/dev/null || echo "No JS files"
+          cp "$BUILD_DIR"/*.wasm deploy/ 2>/dev/null || echo "No WASM files"
+          cp "$BUILD_DIR"/*.data deploy/ 2>/dev/null || echo "No DATA files"
+          
+          # Rename main HTML file to index.html
+          if [ -f deploy/engine.html ]; then
+            mv deploy/engine.html deploy/index.html
+          else
+            # Find any HTML file and rename it
+            HTML_FILE=$(ls deploy/*.html 2>/dev/null | head -n 1)
+            if [ -n "$HTML_FILE" ]; then
+              mv "$HTML_FILE" deploy/index.html
+            fi
+          fi
+          cp custom-index.html deploy/index.html || mv deploy/engine.html deploy/index.html
+          
+      - name: List deployment files (DETAILED)
+        run: |
+          echo "=== Deployment directory contents ==="
+          ls -lh deploy/
+          echo ""
+          echo "=== Checking for .data file specifically ==="
+          find deploy/ -name "*.data" -exec ls -lh {} \;
+          echo ""
+          echo "=== Total size of deploy directory ==="
+          du -sh deploy/
+          echo ""
+          echo "=== Verifying file types ==="
+          file deploy/* 2>/dev/null || echo "Could not determine file types"
+
+      - name: Setup Git LFS
+        run: |
+          git lfs install
+          git lfs track "*.data"
+
+      - name: Upload Artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: deploy/
+          retention-days: 1
+
+  deploy:
+    needs: build-web
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
