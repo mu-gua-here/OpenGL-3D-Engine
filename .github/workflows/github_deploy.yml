@@ -25,6 +25,10 @@ jobs:
 
       - name: Build WebAssembly
         run: |
+          # Install zlib for Assimp
+          sudo apt-get update
+          sudo apt-get install -y zlib1g-dev
+          
           source emsdk/emsdk_env.sh
           mkdir -p build
           cd build
