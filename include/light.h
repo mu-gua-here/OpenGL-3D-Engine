@@ -51,4 +51,4 @@ void createSpotlight(std::string name, glm::vec3 position, glm::vec3 color, int 
                      std::vector<std::unique_ptr<class Mesh>>&& light_mesh, glm::vec3 scale, std::vector<int> cull_mode);
 void createPointLight(std::string name, glm::vec3 position, glm::vec3 color, int intensity,
                       std::vector<std::unique_ptr<class Mesh>>&& light_mesh, glm::vec3 scale, std::vector<int> cull_mode);
-void updateLight(std::string name, glm::vec3 position, glm::vec3 color, int intensity, glm::vec3 rotation, glm::vec3 offset);
+void updateLight(std::string name, glm::vec3 position, glm::vec3 color, int intensity, glm::vec3 rotation);

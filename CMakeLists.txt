@@ -18,12 +18,6 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-# Detect Emscripten again after project() for use in rest of file
-if(EMSCRIPTEN)
-    message(STATUS "Building for Emscripten/WebAssembly")
-    set(CMAKE_EXECUTABLE_SUFFIX ".html")
-endif()
-
 # Platform-specific settings (only for native builds)
 if(APPLE AND NOT EMSCRIPTEN)
     set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64" CACHE STRING "Build architectures for macOS")
@@ -76,6 +70,58 @@ add_executable(${PROJECT_NAME}
     lib/imgui/imgui_impl_opengl3.cpp
 )
 
+# ============================================================================
+# EMSCRIPTEN CONFIGURATION (after add_executable)
+# ============================================================================
+
+if(EMSCRIPTEN)
+    set(CMAKE_EXECUTABLE_SUFFIX ".html")
+    
+    # Build link flags
+    set(EMSCRIPTEN_LINK_FLAGS "")
+    list(APPEND EMSCRIPTEN_LINK_FLAGS "--preload-file \"${CMAKE_SOURCE_DIR}/res@/res\"")
+    list(APPEND EMSCRIPTEN_LINK_FLAGS "-sALLOW_MEMORY_GROWTH=1")
+    list(APPEND EMSCRIPTEN_LINK_FLAGS "-sMAX_WEBGL_VERSION=2")
+    list(APPEND EMSCRIPTEN_LINK_FLAGS "-sUSE_GLFW=3")
+    list(APPEND EMSCRIPTEN_LINK_FLAGS "-sUSE_WEBGL2=1")
+    list(APPEND EMSCRIPTEN_LINK_FLAGS "-sWASM=1")
+    
+    string(REPLACE ";" " " EMSCRIPTEN_LINK_FLAGS "${EMSCRIPTEN_LINK_FLAGS}")
+    
+    set_target_properties(${PROJECT_NAME} PROPERTIES
+        LINK_FLAGS "${EMSCRIPTEN_LINK_FLAGS}"
+    )
+    
+    # Build Assimp from source for Emscripten
+    include(FetchContent)
+    
+    message(STATUS "Fetching Assimp for Emscripten...")
+    
+    # Disable strict warnings for Assimp
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-error=nontrivial-memcall")
+    
+    FetchContent_Declare(
+        assimp
+        GIT_REPOSITORY https://github.com/assimp/assimp.git
+        GIT_TAG v5.4.3
+        GIT_SHALLOW TRUE
+    )
+    set(ASSIMP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    set(ASSIMP_BUILD_ASSIMP_TOOLS OFF CACHE BOOL "" FORCE)
+    set(ASSIMP_INSTALL OFF CACHE BOOL "" FORCE)
+    set(ASSIMP_NO_EXPORT ON CACHE BOOL "" FORCE)
+    set(ASSIMP_BUILD_ALL_IMPORTERS_BY_DEFAULT OFF CACHE BOOL "" FORCE)
+    set(ASSIMP_BUILD_OBJ_IMPORTER ON CACHE BOOL "" FORCE)
+    set(ASSIMP_BUILD_FBX_IMPORTER ON CACHE BOOL "" FORCE)
+    set(ASSIMP_WARNINGS_AS_ERRORS OFF CACHE BOOL "" FORCE)
+    set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+    FetchContent_MakeAvailable(assimp)
+    
+    target_link_libraries(${PROJECT_NAME} PRIVATE assimp)
+    
+    message(STATUS "✓ Emscripten build configured with Assimp from source")
+endif()
+
 # macOS-specific Info.plist
 if(APPLE AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/Info.plist")
     target_link_options(${PROJECT_NAME} PRIVATE
@@ -94,41 +140,10 @@ target_include_directories(
 )
 
 # ============================================================================
-# LIBRARY DETECTION AND LINKING
+# LIBRARY DETECTION AND LINKING (NATIVE ONLY)
 # ============================================================================
 
-if(EMSCRIPTEN)
-    # Emscripten/WebAssembly - Use Emscripten ports and vendored Assimp
-    message(STATUS "Configuring for Emscripten")
-    target_include_directories(${PROJECT_NAME} PRIVATE
-        "${CMAKE_SOURCE_DIR}/lib/assimp/include"
-    )
-    
-    # Add asset preloading for web
-    set(PRELOAD_FLAGS "")
-    list(APPEND PRELOAD_FLAGS "--preload-file=../res/shaders@/res/shaders")
-    list(APPEND PRELOAD_FLAGS "--preload-file=../res/skyboxes@/res/skyboxes")
-    list(APPEND PRELOAD_FLAGS "--preload-file=../res/scene_models@/res/scene_models")
-    
-    # Shell file using relative path to avoid space issues
-    set(SHELL_FILE_FLAG "--shell-file=../index.html")
-    
-    target_compile_options(${PROJECT_NAME} PRIVATE -O3) 
-
-    target_link_libraries(${PROJECT_NAME} PRIVATE
-        "${CMAKE_SOURCE_DIR}/lib/assimp/libassimp_wasm.a"
-        -sUSE_GLFW=3
-        -sUSE_WEBGL2=1
-        -sUSE_ZLIB=1
-        -sWASM=1
-        -sALLOW_MEMORY_GROWTH=1
-        -sMAXIMUM_MEMORY=1gb
-        ${SHELL_FILE_FLAG}
-        ${PRELOAD_FLAGS}
-    )
-
-else()
-    # Native platforms - Try system libraries first, fallback to FetchContent
+if(NOT EMSCRIPTEN)
     message(STATUS "Configuring for native platform")
     
     set(USING_SYSTEM_LIBS FALSE)
@@ -160,7 +175,7 @@ else()
         set(USING_SYSTEM_LIBS TRUE)
         message(STATUS "✓ Using system libraries (Homebrew/vcpkg)")
     else()
-        message(STATUS "✓ System libraries not found, will fetch from source")
+        message(STATUS "✗ System libraries not found, will fetch from source")
     endif()
     
     # Now link or fetch based on what we found

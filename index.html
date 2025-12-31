@@ -1,33 +1,253 @@
 <!DOCTYPE html>
-<html lang="en-us">
-  <head>
-    <meta charset="utf-8">
-    <title>OpenGL 3D Engine</title>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OpenGL 3D Engine by @mu-gua-here</title>
     <style>
-      body { margin: 0; background-color: black; overflow: hidden; }
-      /* Ensure the canvas fills the screen */
-      #canvas {
-        position: absolute;
-        top: 0; left: 0;
-        width: 100%; height: 100%;
-        border: none;
-        cursor: crosshair;
-      }
-    </style>
-  </head>
-  <body>
-    <canvas id="canvas" oncontextmenu="event.preventDefault()"></canvas>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
 
-    <script type='text/javascript'>
-      var Module = {
-        canvas: (function() {
-          var canvas = document.getElementById('canvas');
-          // This tells Emscripten to listen to this specific element
-          return canvas;
-        })()
-      };
+        body {
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 50%, #7e22ce 100%);
+            font-family: 'Arial', sans-serif;
+            overflow: hidden;
+            color: white;
+        }
+
+        /* Loading Screen */
+        #loading-screen {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            background: linear-gradient(135deg, #0f0c29, #302b63, #24243e);
+            z-index: 9999;
+            transition: opacity 0.5s ease-out;
+        }
+
+        #loading-screen.hidden {
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        .skibidi-toilet {
+            font-size: 80px;
+            animation: spin 2s linear infinite, rainbow 3s linear infinite;
+            margin-bottom: 20px;
+            filter: drop-shadow(0 0 20px rgba(255, 255, 255, 0.5));
+        }
+
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+
+        @keyframes rainbow {
+            0% { filter: hue-rotate(0deg) drop-shadow(0 0 20px currentColor); }
+            100% { filter: hue-rotate(360deg) drop-shadow(0 0 20px currentColor); }
+        }
+
+        .loading-text {
+            font-size: 24px;
+            font-weight: bold;
+            margin-bottom: 20px;
+            text-shadow: 0 0 10px rgba(255, 255, 255, 0.5);
+        }
+
+        .progress-bar {
+            width: 400px;
+            height: 30px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 15px;
+            overflow: hidden;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #ff00ff, #00ffff, #ff00ff);
+            background-size: 200% 100%;
+            animation: shimmer 2s linear infinite;
+            transition: width 0.3s ease;
+            width: 0%;
+        }
+
+        @keyframes shimmer {
+            0% { background-position: -200% 0; }
+            100% { background-position: 200% 0; }
+        }
+
+        .percentage {
+            margin-top: 10px;
+            font-size: 18px;
+            font-weight: bold;
+        }
+
+        .loading-tip {
+            margin-top: 30px;
+            font-size: 14px;
+            opacity: 0.7;
+            font-style: italic;
+            max-width: 500px;
+            text-align: center;
+        }
+
+        /* Canvas */
+        canvas.emscripten {
+            width: 100vw;
+            height: 100vh;
+            display: block;
+            position: absolute;
+            top: 0;
+            left: 0;
+        }
+
+        /* Responsive */
+        @media (max-width: 600px) {
+            .skibidi-toilet {
+                font-size: 60px;
+            }
+            .loading-text {
+                font-size: 18px;
+            }
+            .progress-bar {
+                width: 80vw;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Loading Screen -->
+    <div id="loading-screen">
+        <div class="skibidi-toilet">🚽</div>
+        <div class="loading-text">Loading OpenGL 3D Engine...</div>
+        <div class="progress-bar">
+            <div class="progress-fill" id="progress-fill"></div>
+        </div>
+        <div class="percentage" id="percentage">0%</div>
+        <div class="loading-tip" id="loading-tip">
+            Click anywhere to start • Use WASD to move • E/Q for up/down • ESC to pause
+        </div>
+    </div>
+
+    <!-- Canvas (created by Emscripten) -->
+    <canvas class="emscripten" id="canvas" oncontextmenu="event.preventDefault()" tabindex=-1></canvas>
+
+    <script>
+        const loadingScreen = document.getElementById('loading-screen');
+        const progressFill = document.getElementById('progress-fill');
+        const percentageText = document.getElementById('percentage');
+        const loadingTip = document.getElementById('loading-tip');
+
+        const tips = [
+            "Did you know? This engine uses PBR rendering!",
+            "Shadows are calculated in real-time using shadow mapping",
+            "The scene contains over 45,000 triangles",
+            "Built with C++, OpenGL, and WebAssembly",
+            "Skibidi toilet rizz 🚽✨",
+            "GPU-accelerated graphics for maximum performance",
+            "Try pressing Shift while moving for speed boost!"
+        ];
+
+        let currentTip = 0;
+        setInterval(() => {
+            currentTip = (currentTip + 1) % tips.length;
+            loadingTip.textContent = tips[currentTip];
+        }, 3000);
+
+        // Detect environment (declare once, use everywhere)
+        const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+        
+        // Emscripten progress tracking
+        let lastProgress = 0;
+        
+        // IMPORTANT: This must match your WASM module name
+        // If your files are named "OpenGL-3D-Engine.js/wasm/data", use this:
+        var Module = {
+            preRun: [],
+            postRun: [],
+            // Tell Emscripten where to find .wasm and .data files
+            locateFile: function(path, prefix) {
+                if (isLocal) {
+                    return 'build-web/bin/' + path;
+                }
+                return prefix + path;
+            },
+            print: (function() {
+                return function(text) {
+                    console.log(text);
+                };
+            })(),
+            printErr: function(text) {
+                console.error(text);
+            },
+            canvas: (function() {
+                const canvas = document.getElementById('canvas');
+                canvas.addEventListener("webglcontextlost", function(e) {
+                    alert('WebGL context lost. You will need to reload the page.');
+                    e.preventDefault();
+                }, false);
+                return canvas;
+            })(),
+            setStatus: function(text) {
+                if (!text) {
+                    // Loading complete
+                    progressFill.style.width = '100%';
+                    percentageText.textContent = '100%';
+                    setTimeout(() => {
+                        loadingScreen.classList.add('hidden');
+                    }, 500);
+                    return;
+                }
+                
+                // Parse progress from Emscripten status text
+                const match = text.match(/([^(]+)\((\d+(\.\d+)?)\/(\d+)\)/);
+                if (match) {
+                    const loaded = parseFloat(match[2]);
+                    const total = parseFloat(match[4]);
+                    const progress = Math.floor((loaded / total) * 100);
+                    
+                    if (progress > lastProgress) {
+                        lastProgress = progress;
+                        progressFill.style.width = progress + '%';
+                        percentageText.textContent = progress + '%';
+                    }
+                }
+                
+                console.log('Status: ' + text);
+            },
+            totalDependencies: 0,
+            monitorRunDependencies: function(left) {
+                this.totalDependencies = Math.max(this.totalDependencies, left);
+                const progress = Math.floor((1 - left / this.totalDependencies) * 100);
+                
+                if (progress > lastProgress) {
+                    lastProgress = progress;
+                    progressFill.style.width = progress + '%';
+                    percentageText.textContent = progress + '%';
+                }
+                
+                Module.setStatus(left ? 'Preparing... (' + (this.totalDependencies - left) + '/' + this.totalDependencies + ')' : '');
+            }
+        };
+
+        Module.setStatus('Downloading...');
+
+        window.onerror = function(event) {
+            console.error('Error: ' + event);
+            Module.setStatus('Error occurred. Check console for details.');
+        };
     </script>
     
     {{{ SCRIPT }}}
-  </body>
+</body>
 </html>

@@ -296,7 +296,6 @@ void emscripten_main_loop_callback() {
         return;
     }
     
-    double frameStart = glfwGetTime();
     updateFPS(window);
     
     if (!paused) {
@@ -401,7 +400,7 @@ void emscripten_main_loop_callback() {
             }
             
             if (!is_light) {
-                renderer->drawEntity(entity, global_camera, shadowLightIndex);
+                renderer->drawEntity(entity, shadowLightIndex);
             }
         }
     }

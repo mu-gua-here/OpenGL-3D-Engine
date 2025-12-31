@@ -202,15 +202,15 @@ void Renderer::setGlobalUniforms(const Camera& camera) {
     pbr_shader->setVec3("viewPos", camera.position);
 }
 
-void Renderer::drawEntity(Entity* entity, const Camera& camera, int shadowLightIndex) {
+void Renderer::drawEntity(Entity* entity, int shadowLightIndex) {
     if (!entity->active) return;
     for (const auto& meshPtr : entity->meshes) {
         Mesh* mesh = meshPtr.get();
-        drawMesh(entity, mesh, camera, shadowLightIndex);
+        drawMesh(entity, mesh, shadowLightIndex);
     }
 }
 
-void Renderer::drawMesh(Entity* entity, Mesh* mesh, const Camera& camera, int shadowLightIndex) {
+void Renderer::drawMesh(Entity* entity, Mesh* mesh, int shadowLightIndex) {
     if (!entity->active || mesh->TRIANGLE_COUNT == 0 || !mesh->isValid()) {
         return;
     }

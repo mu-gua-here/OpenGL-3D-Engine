@@ -91,7 +91,7 @@ void createPointLight(std::string name, glm::vec3 position, glm::vec3 color, int
     printf("Created point light '%s' with intensity %d\n", name.c_str(), intensity);
 }
 
-void updateLight(std::string name, glm::vec3 position, glm::vec3 color, int intensity, glm::vec3 rotation, glm::vec3 offset) {
+void updateLight(std::string name, glm::vec3 position, glm::vec3 color, int intensity, glm::vec3 rotation) {
     int lightIndex = -1;
     for (size_t i = 0; i < lights.size(); i++) {
         if (lights[i].entity_name == name) {

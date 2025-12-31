@@ -22,7 +22,7 @@ public:
     
     void renderShadowPass(EntityManager& entity_manager, const Light& light);
     void setGlobalUniforms(const Camera& camera);
-    void drawEntity(Entity* entity, const Camera& camera, int shadowLightIndex);
-    void drawMesh(Entity* entity, Mesh* mesh, const Camera& camera, int shadowLightIndex);
+    void drawEntity(Entity* entity, int shadowLightIndex);
+    void drawMesh(Entity* entity, Mesh* mesh, int shadowLightIndex);
     void drawUnlitMesh(Entity* entity, Mesh* mesh, const glm::vec3& color, int intensity);
 };

@@ -49,10 +49,8 @@ std::filesystem::path getExecutableDirectory() {
 
     // Search for CMakeLists.txt to identify dev environment
     std::filesystem::path searchPath = executable_path;
-    bool isDevEnvironment = false;
     for (int i = 0; i < 5; i++) {
         if (std::filesystem::exists(searchPath / "CMakeLists.txt")) {
-            isDevEnvironment = true;
             executable_path = searchPath;
             break;
         }
