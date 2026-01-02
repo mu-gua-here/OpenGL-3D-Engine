@@ -349,6 +349,7 @@ void emscripten_main_loop_callback() {
         entity_manager.updateEntity("cube", VEC3_NO_CHANGE, glm::vec3(update_count * 0.1f, update_count * 0.1f, update_count * 0.1f), VEC3_NO_CHANGE);
         entity_manager.updateEntity("sphere", glm::vec3(NAN, 2.5f + sinf(update_count * 0.01f), NAN), glm::vec3(update_count, 0, 0), VEC3_NO_CHANGE);
         entity_manager.updateEntity("statue", VEC3_NO_CHANGE, glm::vec3(NAN, update_count, NAN), VEC3_NO_CHANGE);
+        entity_manager.updateEntity("instructions", glm::vec3(NAN, 2.0f + 0.05f * sinf(update_count * 0.05f), NAN), VEC3_NO_CHANGE, VEC3_NO_CHANGE);
 
         update_count += tick_speed;
     }
@@ -648,7 +649,6 @@ int main() {
     auto instructions_mesh = loadMesh("instructions_panel/quad.obj");    
     auto cube_mesh = loadMesh("cube/cube.obj");    
     auto sphere_mesh = loadMesh("sphere/sphere.obj");    
-    auto streetlight_mesh = loadMesh("streetlight/streetlight.obj");
     auto cone_mesh = loadMesh("cone/cone.obj");
     auto statue_mesh = loadMesh("statue/statue_of_myself.obj");
     auto plastic_table = loadMesh("plastic_table/plastic_table.obj");    
@@ -681,7 +681,6 @@ int main() {
     createEntity("instructions", std::move(instructions_mesh), glm::vec3(0, 2, 4), glm::vec3(0, 0, 0), glm::vec3(1, 1, 1), std::vector<int> {CULL_NONE});
     createEntity("cube", std::move(cube_mesh), glm::vec3(5, 3, 0), glm::vec3(0, 0, 0), glm::vec3(1, 1, 1), std::vector<int> {CULL_BACK});
     createEntity("sphere", std::move(sphere_mesh), glm::vec3(0, 2, -5), glm::vec3(0, 0, 0), glm::vec3(1, 1, 1), std::vector<int> {CULL_BACK});
-    createEntity("streetlight", std::move(streetlight_mesh), glm::vec3(-7, 0.02, 0), glm::vec3(0, 0, 0), glm::vec3(1, 1, 1), std::vector<int>{CULL_BACK});
     createEntity("cone", std::move(cone_mesh), glm::vec3(0, 10, 0), glm::vec3(0, 0, 0), glm::vec3(1, 1, 1), std::vector<int>{CULL_BACK});
     createEntity("statue", std::move(statue_mesh), glm::vec3(-5, 1.9, -4), glm::vec3(0, 0, 0), glm::vec3(0.1, 0.1, 0.1), std::vector<int>{CULL_BACK});
     createEntity("plastic_table", std::move(plastic_table), glm::vec3(-5, 0, -4), glm::vec3(0, 0, 0), glm::vec3(0.5, 0.5, 0.5), std::vector<int>{CULL_BACK});
