@@ -30,6 +30,12 @@ void Skybox::bindSkybox(const char* faces[6]) {
 }
 
 void Skybox::initShader() {
+    // DEBUG
+    #ifdef __EMSCRIPTEN__
+        printf("=== SKYBOX VERTEX SHADER ===\n%s\n=========================\n", 
+               skybox_vertex_shader.c_str());
+    #endif
+
     try {
         skybox_shader = std::make_unique<Shader>(skybox_vertex_shader.c_str(), skybox_fragment_shader.c_str());
         printf("Skybox shaders created successfully. ID: %u\n", skybox_shader->getProgram());
