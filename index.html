@@ -153,7 +153,6 @@
             "Shadows are calculated in real-time using shadow mapping",
             "The scene contains over 45,000 triangles",
             "Built with C++, OpenGL, and WebAssembly",
-            "Skibidi toilet rizz 🚽✨",
             "GPU-accelerated graphics for maximum performance",
             "Try pressing Shift while moving for speed boost!"
         ];
@@ -170,8 +169,6 @@
         // Emscripten progress tracking
         let lastProgress = 0;
         
-        // IMPORTANT: This must match your WASM module name
-        // If your files are named "OpenGL-3D-Engine.js/wasm/data", use this:
         var Module = {
             preRun: [],
             postRun: [],
@@ -189,6 +186,16 @@
             })(),
             printErr: function(text) {
                 console.error(text);
+                // If it's an important error, show it on screen
+                if (text.includes('error') || text.includes('failed') || text.includes('GL ERROR')) {
+                    document.getElementById('loading-tip').textContent = text;
+                    document.getElementById('loading-tip').style.color = '#ff4444';
+                }
+            },
+            onAbort: function(what) {
+                // 'what' contains the error message from C++
+                console.error('ABORT: ' + what);
+                alert('Engine crashed: ' + what);  // Shows error to user
             },
             canvas: (function() {
                 const canvas = document.getElementById('canvas');

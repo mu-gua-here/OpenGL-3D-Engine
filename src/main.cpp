@@ -44,33 +44,13 @@
 #include "imgui_impl_glfw.h"
 #include "imgui_impl_opengl3.h"
 
-// Texture loader
+// STB (image loading)
 #define STB_IMAGE_IMPLEMENTATION
-#include "stb_image.h"
-
-// 3D file importer
-#include <assimp/Importer.hpp>
-#include <assimp/scene.h>
-#include <assimp/postprocess.h>
-
-// C++ extensions
-#include <iostream>
-#include <string>
-#include <fstream>
-#include <sstream>
-#include <vector>
-#include <unordered_set>
-#include <memory>
-#include <cmath>
-#include <cstdio>
+#include <stb_image.h>
 
 // GLM library
 #define GLM_ENABLE_EXPERIMENTAL
 #include <glm/glm.hpp>
-#include <glm/gtc/matrix_transform.hpp>
-#include <glm/gtc/type_ptr.hpp>
-#include <glm/gtx/hash.hpp>
-#include <glm/gtx/string_cast.hpp>
 #include <glm/gtx/euler_angles.hpp>
 
 // Emscripten
@@ -78,6 +58,10 @@
     #include <emscripten.h>
     #include <emscripten/html5.h>
 #endif
+
+// C++ extensions
+#include <iostream>
+#include <vector>
 
 // Function prototypes
 void mouse_callback(GLFWwindow* window, double xpos, double ypos);
@@ -161,16 +145,6 @@ unsigned int skyboxID;
 Skybox* g_skybox = nullptr;  // Global pointer to skybox
 
 GLuint default_texture_id = 0;
-
-// Shaders
-std::string pbr_vertex_shader;
-std::string pbr_fragment_shader;
-std::string unlit_vertex_shader;
-std::string unlit_fragment_shader;
-std::string skybox_vertex_shader;
-std::string skybox_fragment_shader;
-std::string shadow_vertex_shader;
-std::string shadow_fragment_shader;
 
 const glm::vec3 VEC3_NO_CHANGE = glm::vec3(NAN, NAN, NAN);
 
@@ -604,10 +578,6 @@ int main() {
     // ============================================================================
     
     // LOAD SKYBOXES //
-    
-    // Load skybox shaders
-    skybox_vertex_shader = loadShaderFile(buildAssetPath("res/shaders/skybox.vs"));
-    skybox_fragment_shader = loadShaderFile(buildAssetPath("res/shaders/skybox.fs"));
     
     // Initialise skybox
     skyboxID = 0;

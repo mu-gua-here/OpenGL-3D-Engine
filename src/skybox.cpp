@@ -10,8 +10,8 @@
 // Forward declarations for external functions
 extern GLuint loadCubemap(const char* faces[6]);
 extern const float SKYBOX_VERTICES[];
-extern std::string skybox_vertex_shader;
-extern std::string skybox_fragment_shader;
+std::string skybox_vertex_shader;
+std::string skybox_fragment_shader;
 
 void Skybox::bindSkybox(const char* faces[6]) {
     cubemap_texture.push_back(loadCubemap(faces));

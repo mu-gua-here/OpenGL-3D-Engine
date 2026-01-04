@@ -85,6 +85,12 @@ if(EMSCRIPTEN)
     list(APPEND EMSCRIPTEN_LINK_FLAGS "-sUSE_GLFW=3")
     list(APPEND EMSCRIPTEN_LINK_FLAGS "-sUSE_WEBGL2=1")
     list(APPEND EMSCRIPTEN_LINK_FLAGS "-sWASM=1")
+    list(APPEND EMSCRIPTEN_LINK_FLAGS "-sFULL_ES3=1")
+
+    # Debugging flags
+    list(APPEND EMSCRIPTEN_LINK_FLAGS "-sASSERTIONS=2")  # Enable assertions
+    list(APPEND EMSCRIPTEN_LINK_FLAGS "-sSAFE_HEAP=1")   # Check for bad memory access
+    list(APPEND EMSCRIPTEN_LINK_FLAGS "-sSTACK_OVERFLOW_CHECK=2")  # Detect stack overflow
     
     string(REPLACE ";" " " EMSCRIPTEN_LINK_FLAGS "${EMSCRIPTEN_LINK_FLAGS}")
     
