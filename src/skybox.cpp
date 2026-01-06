@@ -1,5 +1,7 @@
 #include "skybox.h"
 #include "camera.h"
+#include "filesystem.h"
+#include "shader_loading.h"
 #include <glad/glad.h>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
@@ -30,14 +32,11 @@ void Skybox::bindSkybox(const char* faces[6]) {
 }
 
 void Skybox::initShader() {
-    // DEBUG
-    #ifdef __EMSCRIPTEN__
-        printf("=== SKYBOX VERTEX SHADER ===\n%s\n=========================\n", 
-               skybox_vertex_shader.c_str());
-    #endif
-
     try {
-        skybox_shader = std::make_unique<Shader>(skybox_vertex_shader.c_str(), skybox_fragment_shader.c_str());
+        std::string skybox_vert = loadShaderFile(buildAssetPath("res/shaders/skybox.vs"));
+        std::string skybox_frag = loadShaderFile(buildAssetPath("res/shaders/skybox.fs"));
+        
+        skybox_shader = std::make_unique<Shader>(skybox_vert, skybox_frag);
         printf("Skybox shaders created successfully. ID: %u\n", skybox_shader->getProgram());
     } catch (const std::exception& e) {
         printf("Failed to create skybox shaders: %s\n", e.what());

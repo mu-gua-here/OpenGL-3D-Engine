@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <filesystem>
 #include "filesystem.h"
+#include "shader_loading.h"
 
 // ============================================================================
 // SHADER LOADING FUNCTIONS

@@ -85,10 +85,6 @@ void framebuffer_size_callback(GLFWwindow* window, int width, int height);
 #include "shadowmap.h"
 #include "skybox.h"
 
-// Forward declarations
-std::string loadShaderFile(const std::string& path);
-std::string buildAssetPath(const std::string& relative_path);
-
 // ============================================================================
 // GLOBAL VARIABLES
 // ============================================================================
