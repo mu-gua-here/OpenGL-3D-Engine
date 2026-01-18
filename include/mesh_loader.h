@@ -21,4 +21,4 @@ ORMResult packORM(Material& mat, const std::string& current_material_name, const
 
 Material createMaterialFromAssimp(std::string modelPath, aiMaterial* material, const aiScene* scene);
 
-std::vector<std::unique_ptr<Mesh>> loadMesh(const std::string& filepath);
+std::vector<std::shared_ptr<Mesh>> loadMesh(const std::string& filepath);

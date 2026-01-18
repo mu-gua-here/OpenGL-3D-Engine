@@ -4,6 +4,7 @@
 #include <vector>
 #include <memory>
 #include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
 #include "mesh.h"
 
 struct Entity {
@@ -11,8 +12,46 @@ struct Entity {
     glm::vec3 position;
     glm::vec3 rotation;
     glm::vec3 scale;
-    std::vector<std::unique_ptr<Mesh>> meshes;
+    std::vector<std::shared_ptr<Mesh>> meshes;
     int active;
+
+    // Dynamic LOD system
+    struct LODLevel {
+        std::vector<std::shared_ptr<Mesh>> meshes;
+        float maxDistance;  // Use this LOD up to this distance
+    };
+    
+    std::vector<LODLevel> lod_levels;
+
+    // Helper function to get appropriate LOD based on distance
+    const std::vector<std::shared_ptr<Mesh>>& getMeshesForDistance(float distance) const {
+        // Find the appropriate LOD level
+        for (const auto& level : lod_levels) {
+            if (distance <= level.maxDistance) {
+                return level.meshes;
+            }
+        }
+        
+        // If beyond all LOD ranges, use the lowest detail (last one)
+        if (!lod_levels.empty()) {
+            return lod_levels.back().meshes;
+        }
+        
+        // Fallback to empty (shouldn't happen)
+        static std::vector<std::shared_ptr<Mesh>> empty;
+        return empty;
+    }
+    
+    glm::mat4 getModelMatrix(Entity* entity) {
+        glm::mat4 model = glm::mat4(1.0f);
+        model = glm::translate(model, entity->position);
+        // Apply rotation (using Euler angles to match your update logic)
+        model = glm::rotate(model, glm::radians(entity->rotation.x), glm::vec3(1, 0, 0));
+        model = glm::rotate(model, glm::radians(entity->rotation.y), glm::vec3(0, 1, 0));
+        model = glm::rotate(model, glm::radians(entity->rotation.z), glm::vec3(0, 0, 1));
+        model = glm::scale(model, entity->scale);
+        return model;
+    }
 };
 
 class EntityManager {
@@ -33,8 +72,7 @@ public:
 
 extern EntityManager entity_manager;
 
-// Helper function to create entities with mesh loading and cull modes
-void createEntity(std::string name, std::vector<std::unique_ptr<Mesh>>&& meshes, glm::vec3 pos, glm::vec3 rotation, glm::vec3 scale, std::vector<int> cull_modes);
+void createEntity(std::string name, const std::vector<std::pair<float, std::vector<std::shared_ptr<Mesh>>>>& lodSpecs, glm::vec3 pos, glm::vec3 rotation, glm::vec3 scale, std::vector<int> cull_modes);
 
 // Template implementation must be in header
 template <typename Pred>

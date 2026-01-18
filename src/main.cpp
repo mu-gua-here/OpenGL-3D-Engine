@@ -11,25 +11,19 @@
  3D MODELS:
  Realistic tree model: "Tree02" (https://free3d.com/3d-model/tree02-35663.html) by rezashams313 is licensed under Creative Commons Attribution-NonCommercial (http://creativecommons.org/licenses/by-nc/4.0/).
  Road track model: "Road Modular" (https://skfb.ly/pxYZw) by golukumar is licensed under Creative Commons Attribution (http://creativecommons.org/licenses/by/4.0/).
- Residential buildings model: "Low Poly Residential Buildings Pack" (https://free3d.com/3d-model/array-house-example-3033.html) by 3dhaupt is licensed under Creative Commons Attribution-NonCommercial (http://creativecommons.org/licenses/by-nc/4.0/).
  Lamppost model: "Street Lantern" (https://skfb.ly/oMIXI) by Samuel F. Johanns (Oneironauticus) is licensed under Creative Commons Attribution (http://creativecommons.org/licenses/by/4.0/). 
  
  TEXTURES:
  Checkered grass texture: "Green grass field pattern background for soccer and football. | Premium Photo" (https://ar.pinterest.com/pin/797629784037209282/) by Freepik is licensed under Creative Commons Attribution (http://creativecommons.org/licenses/by/4.0/).
 
  IMPLEMENTATION LIST
- 1. Physics (maybe)
- 2. Optimizations
-    a. Batching
-    b. Instancing
-    c. Frustum culling
-    d. LOD
- 3. Complete PBR implementation (esp. IBL)
- 4. Increase view distance for shadows
+ 1. Physics
+ 2. Complete PBR implementation (esp. IBL)
  
  BUGS & IMPROVEMENTS LIST
  1. Fix ImGui window mouse interaction
- 2. Fix lamppost mesh
+ 2. Use cascaded shadow maps for bigger shadow view distance
+ 3. Passing meshes into light sources breaks the entire scene
 
  NOTES FOR OTHER DEVELOPERS
  1. If you try to export the textures here elsewhere it might look strange because I'd flipped the textures for them to work in OpenGL
@@ -46,7 +40,7 @@
 
 // STB (image loading)
 #define STB_IMAGE_IMPLEMENTATION
-#include <stb_image.h>
+#include "stb_image.h"
 
 // GLM library
 #define GLM_ENABLE_EXPERIMENTAL
@@ -62,6 +56,7 @@
 // C++ extensions
 #include <iostream>
 #include <vector>
+#include <map>
 
 // Function prototypes
 void mouse_callback(GLFWwindow* window, double xpos, double ypos);
@@ -71,7 +66,7 @@ void framebuffer_size_callback(GLFWwindow* window, int width, int height);
 // FILE INCLUDES
 // ============================================================================
 
-#include "asset_loader.h"
+#include "texture_loader.h"
 #include "camera.h"
 #include "color.h"
 #include "entity_manager.h"
@@ -99,9 +94,11 @@ double fps;
 bool paused = false;
 float update_count = 0;
 float frame_time = 1.0f;
-float tick_speed = 1.0f;
 bool fullscreen = false;
 bool initialization_complete = false;  // Loading state tracker
+
+// Others
+bool debug_mode = false;
 
 // Performance queries
 GLuint shadowQueries[2] = {0, 0};
@@ -114,9 +111,6 @@ double mainTime = 0.0;
 double skyboxTime = 0.0;
 
 // Player/camera
-float cam_speed_multiplier = 0.005f;
-glm::vec3 global_camera_vel = {0, 0, 0};
-float friction = 0.9f;
 glm::mat4 view;
 glm::mat4 projection;
 Camera global_camera;
@@ -142,7 +136,13 @@ Skybox* g_skybox = nullptr;  // Global pointer to skybox
 
 GLuint default_texture_id = 0;
 
-const glm::vec3 VEC3_NO_CHANGE = glm::vec3(NAN, NAN, NAN);
+const glm::vec3 VEC3_NO_CHANGE = glm::vec3(
+    std::numeric_limits<float>::max(),
+    std::numeric_limits<float>::max(),
+    std::numeric_limits<float>::max()
+);
+
+const float NO_CHANGE = std::numeric_limits<float>::max();
 
 // ============================================================================
 // EMSCRIPTEN CONTEXT
@@ -172,7 +172,6 @@ void updateFPS(GLFWwindow* window) {
     double currentTime = glfwGetTime();
     frame_time = currentTime - lastTime;
     lastTime = currentTime;
-    tick_speed = frame_time / 0.0083f;
     
     frameCount++;
     fpsTimer += frame_time;
@@ -224,7 +223,7 @@ GLuint createDefaultTexture() {
 
 class Mesh;
 Material createMaterialFromAssimp(std::string modelPath, aiMaterial* material, const aiScene* scene);
-std::vector<std::unique_ptr<Mesh>> loadMesh(const std::string& filepath);
+std::vector<std::shared_ptr<Mesh>> loadMesh(const std::string& filepath);
 
 // ============================================================================
 // MAIN LOOP CALLBACK
@@ -261,7 +260,6 @@ void emscripten_main_loop_callback() {
         ImGui::Render();
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
         glfwSwapBuffers(window);
-        glFlush();
         glfwPollEvents();
         return;
     }
@@ -273,7 +271,7 @@ void emscripten_main_loop_callback() {
         float sin_yaw = sinf(yaw_rad);
         float cos_yaw = cosf(yaw_rad);
         glm::vec3 cam_offset = glm::vec3(0.0f);
-        float actual_cam_speed = tick_speed * cam_speed_multiplier;
+        float actual_cam_speed = frame_time * global_camera.speed_multiplier;
         
         if (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_RIGHT_SHIFT) == GLFW_PRESS) {
             actual_cam_speed *= 2;
@@ -296,32 +294,39 @@ void emscripten_main_loop_callback() {
             cam_offset = glm::normalize(cam_offset);
         }
 
-        global_camera_vel.x += cam_offset.x * actual_cam_speed;
-        global_camera_vel.z += cam_offset.z * actual_cam_speed;
+        global_camera.velocity.x += cam_offset.x * actual_cam_speed;
+        global_camera.velocity.z += cam_offset.z * actual_cam_speed;
         
         if (glfwGetKey(window, GLFW_KEY_E) == GLFW_PRESS) {
-            global_camera_vel.y += actual_cam_speed;
+            global_camera.velocity.y += actual_cam_speed;
         }
         if (glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS) {
-            global_camera_vel.y -= actual_cam_speed;
+            global_camera.velocity.y -= actual_cam_speed;
         }
 
-        global_camera_vel *= friction;
-        global_camera.position = global_camera.position + global_camera_vel;
+        global_camera.velocity *= global_camera.friction;
+        global_camera.position = global_camera.position + global_camera.velocity;
         
         view = camera_get_view_matrix(&global_camera);
         projection = camera_get_projection(&global_camera);
         
         // ============================================================================
+        // UPDATE LIGHTS
+        // ============================================================================
+
+
+
+        // ============================================================================
         // UPDATE ENTITIES
         // ============================================================================
 
         entity_manager.updateEntity("cube", VEC3_NO_CHANGE, glm::vec3(update_count * 0.1f, update_count * 0.1f, update_count * 0.1f), VEC3_NO_CHANGE);
-        entity_manager.updateEntity("sphere", glm::vec3(NAN, 2.5f + sinf(update_count * 0.01f), NAN), glm::vec3(update_count, 0, 0), VEC3_NO_CHANGE);
-        entity_manager.updateEntity("statue", VEC3_NO_CHANGE, glm::vec3(NAN, update_count, NAN), VEC3_NO_CHANGE);
-        entity_manager.updateEntity("instructions", glm::vec3(NAN, 2.0f + 0.05f * sinf(update_count * 0.05f), NAN), VEC3_NO_CHANGE, VEC3_NO_CHANGE);
+        entity_manager.updateEntity("sphere", glm::vec3(NO_CHANGE, 2.5f + sinf(update_count * 0.01f), NO_CHANGE), glm::vec3(update_count, 0, 0), VEC3_NO_CHANGE);
+        entity_manager.updateEntity("statue", VEC3_NO_CHANGE, glm::vec3(NO_CHANGE, update_count, NO_CHANGE), VEC3_NO_CHANGE);
+        entity_manager.updateEntity("instructions", glm::vec3(NO_CHANGE, 2.0f + 0.05f * sinf(update_count * 0.05f), NO_CHANGE), VEC3_NO_CHANGE, VEC3_NO_CHANGE);
+        entity_manager.updateEntity("character_idle", VEC3_NO_CHANGE, VEC3_NO_CHANGE, glm::vec3(0, update_count * 0.1f, 0));
 
-        update_count += tick_speed;
+        update_count += frame_time * 60.0f;
     }
     
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
@@ -344,38 +349,42 @@ void emscripten_main_loop_callback() {
         glBeginQuery(GL_TIME_ELAPSED, skyboxQueries[queryIndex]);
     #endif
     
-    skybox->render(&global_camera);
-    
     #ifndef __EMSCRIPTEN__
         glEndQuery(GL_TIME_ELAPSED);
         glBeginQuery(GL_TIME_ELAPSED, mainQueries[queryIndex]);
     #endif
-    
-    renderer->setGlobalUniforms(global_camera);
 
+    // Frustum culling and cache visible entities
+    renderer->cullEntities(entity_manager, projection * view);
+    
+    // Eliminate overdraw by using depth pre-pass
+    renderer->renderDepthPrepass();  // Use cached entities
+    
+    renderer->setGlobalUniforms(global_camera, shadowLightIndex);
+    
+    // Render light sources as unlit objects
     for (size_t i = 0; i < entity_manager.size(); i++) {
         Entity* entity = entity_manager.getEntityAt(i);
-        if (entity && entity->active) {
-            bool is_light = false;
-            for (const auto& light : lights) {
-                if (entity->name == light.entity_name) {
-                    is_light = true;
-                    for (const auto& meshPtr : entity->meshes) {
-                        Mesh* mesh = meshPtr.get();
-                        if (mesh && mesh->isValid()) {
-                            renderer->drawUnlitMesh(entity, mesh, light.color, light.intensity);
-                        }
+        if (!entity || !entity->active) continue;
+
+        for (const auto& light : lights) {
+            if (entity->name == light.entity_name) {
+                for (const auto& meshPtr : entity->meshes) {
+                    if (meshPtr && meshPtr->isValid()) {
+                        renderer->drawUnlitMesh(entity, meshPtr.get(), light.color, light.intensity);
                     }
-                    break;
                 }
-            }
-            
-            if (!is_light) {
-                renderer->drawEntity(entity, shadowLightIndex);
+                break; 
             }
         }
     }
-    
+
+    // Render rest of the scene
+    renderer->renderScene(entity_manager);  // Use cached entities
+
+    // Render skybox last
+    skybox->render(&global_camera);
+
     #ifndef __EMSCRIPTEN__
         glEndQuery(GL_TIME_ELAPSED);
         queryIndex = 1 - queryIndex;
@@ -384,31 +393,7 @@ void emscripten_main_loop_callback() {
 
     glfwPollEvents();
 
-    // ImGui UI
-    ImGui_ImplOpenGL3_NewFrame();
-    ImGui_ImplGlfw_NewFrame();
-    ImGui::NewFrame();
-    ImGui::SetNextWindowPos(ImVec2(10, 10));
-    ImGui::Begin("Engine");
-    ImGui::Text("FPS: %.1f", fps);
-    ImGui::Text("Triangles: %u", total_triangles);
-    
-    #ifndef __EMSCRIPTEN__
-        ImGui::Text("GPU Frame Time:");
-        ImGui::Text("Shadows: %.3f ms", shadowTime);
-        ImGui::Text("Skybox: %.3f ms", skyboxTime);
-        ImGui::Text("Main: %.3f ms", mainTime);
-        ImGui::Text("Total GPU: %.3f ms", shadowTime + skyboxTime + mainTime);
-    #else
-        ImGui::Text("(GPU timing disabled on Web)");
-    #endif
-    
-    #ifndef __EMSCRIPTEN__
-        if (ImGui::Button("V-Sync ON")) glfwSwapInterval(1);
-        if (ImGui::Button("V-Sync OFF")) glfwSwapInterval(0);
-    #endif
-    ImGui::End();
-
+    // Handle mouse input for pausing/unpausing
     if (glfwGetInputMode(window, GLFW_CURSOR) == GLFW_CURSOR_NORMAL && !ImGui::GetIO().WantCaptureMouse) {
         if (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS) {
             firstMouse = true;
@@ -422,8 +407,12 @@ void emscripten_main_loop_callback() {
             #endif
             paused = false;
         }
+    } else if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS) {
+        glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+        paused = true;
     }
     
+    // Handle fullscreen entry/exit - only on native platforms
     #ifndef __EMSCRIPTEN__
         static bool fullscreen_toggle = false;
         if (glfwGetKey(window, GLFW_KEY_ENTER) == GLFW_PRESS && glfwGetKey(window, GLFW_KEY_LEFT_ALT) && !fullscreen_toggle) {
@@ -452,11 +441,85 @@ void emscripten_main_loop_callback() {
         if (glfwGetKey(window, GLFW_KEY_ENTER) == GLFW_RELEASE && glfwGetKey(window, GLFW_KEY_LEFT_ALT)) fullscreen_toggle = false;
     #endif
 
-    ImGui::Render();
-    ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+    // Toggle debug mode
+    static bool prevGravePressed = false;
+    if (glfwGetKey(window, GLFW_KEY_GRAVE_ACCENT) == GLFW_PRESS && !prevGravePressed) {
+        debug_mode = !debug_mode;
+    }
+    prevGravePressed = (glfwGetKey(window, GLFW_KEY_GRAVE_ACCENT) == GLFW_PRESS);
+
+    // ImGui UI
+    if (debug_mode) {
+        ImGui_ImplOpenGL3_NewFrame();
+        ImGui_ImplGlfw_NewFrame();
+        ImGui::NewFrame();
+        ImGui::SetNextWindowPos(ImVec2(10, 10));
+        ImGui::Begin("General");
+        ImGui::Text("FPS: %.1f", fps);
+        ImGui::Text("Triangles: %u", total_triangles);
+        
+        #ifndef __EMSCRIPTEN__
+            ImGui::Text("GPU Frame Time:");
+            ImGui::Text("Shadows: %.3f ms", shadowTime);
+            ImGui::Text("Skybox: %.3f ms", skyboxTime);
+            ImGui::Text("Main: %.3f ms", mainTime);
+            ImGui::Text("Total GPU: %.3f ms", shadowTime + skyboxTime + mainTime);
+            if (ImGui::Button("V-Sync ON")) glfwSwapInterval(1);
+            if (ImGui::Button("V-Sync OFF")) glfwSwapInterval(0);
+        #else
+            ImGui::Text("(GPU timing disabled on Web)");
+        #endif
+        ImGui::End();
+        
+        ImGui::SetNextWindowPos(ImVec2(WINDOW_WIDTH - 320, 10));
+        ImGui::Begin("Render Stats");
+        ImGui::Text("Entities: %d total, %d culled, %d rendered", 
+                    renderer->stats.entitiesTotal, 
+                    renderer->stats.entitiesCulled,
+                    renderer->stats.entitiesRendered);
+        ImGui::Text("Draw Calls: %d regular, %d instanced", 
+                    renderer->stats.drawCalls,
+                    renderer->stats.instancedDrawCalls);
+        ImGui::Text("Instances Rendered: %d", renderer->stats.instancesRendered);
+        ImGui::Text("Material Changes: %d", renderer->stats.materialChanges);
+        ImGui::Text("Triangles Rendered: %d", renderer->stats.trianglesRendered);
+        
+        float cullEfficiency = renderer->stats.entitiesTotal > 0 
+            ? (float)renderer->stats.entitiesCulled / renderer->stats.entitiesTotal * 100.0f 
+            : 0.0f;
+        ImGui::Text("Cull Efficiency: %.1f%%", cullEfficiency);
+        
+        float avgInstancesPerCall = renderer->stats.instancedDrawCalls > 0
+            ? (float)renderer->stats.instancesRendered / renderer->stats.instancedDrawCalls
+            : 0.0f;
+        ImGui::Text("Avg Instances Per Draw Call: %.1d", (int)avgInstancesPerCall);
+
+        ImGui::End();
+
+        ImGui::SetNextWindowPos(ImVec2(WINDOW_WIDTH - 200, WINDOW_HEIGHT - 130));
+        ImGui::Begin("LOD Stats");
+        ImGui::Text("LOD Stats:");
+        int lod0_count = 0, lod1_count = 0, lod2_count = 0;
+        for (size_t i = 0; i < entity_manager.size(); i++) {
+            Entity* e = entity_manager.getEntityAt(i);
+            if (!e || !e->active) continue;
+            
+            float dist = glm::length(global_camera.position - e->position);
+            if (dist < 25.0f) lod0_count++;
+            else if (dist < 60.0f) lod1_count++;
+            else lod2_count++;
+        }
+        ImGui::Text("LOD0 (high): %d entities", lod0_count);
+        ImGui::Text("LOD1 (med): %d entities", lod1_count);
+        ImGui::Text("LOD2 (low): %d entities", lod2_count);
+        ImGui::End();
+
+        // Send stuff over to ImGui for rendering
+        ImGui::Render();
+        ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+    }
 
     glfwSwapBuffers(window);
-    glFlush();
 }
 
 // ============================================================================
@@ -466,6 +529,27 @@ void emscripten_main_loop_callback() {
 int main() {
     
     printf("Starting OpenGL 3D Engine...\n");
+
+    // Check build type
+    #ifdef NDEBUG
+        printf("✅ BUILD: Release (Optimized)\n");
+    #else
+        printf("⚠️  BUILD: Debug (Unoptimized)\n");
+    #endif
+    
+    // Check optimization level
+    #ifdef __OPTIMIZE__
+        printf("✅ OPTIMIZATION: Enabled\n");
+    #else
+        printf("⚠️  OPTIMIZATION: Disabled\n");
+    #endif
+    
+    // Check LTO
+    #ifdef __OPTIMIZE_SIZE__
+        printf("📦 LTO: Size optimization\n");
+    #elif defined(__OPTIMIZE__)
+        printf("⚡ LTO: Speed optimization\n");
+    #endif
     
     // Initialize GLFW
     if (!glfwInit()) {
@@ -610,16 +694,19 @@ int main() {
 
     printf("Loading meshes...\n");
     
-    auto level_mesh = loadMesh("level/level.obj");    
-    auto tree_mesh = loadMesh("realistic_tree/tree.obj");    
+    auto level_mesh = loadMesh("level/level.obj");
+
+    auto tree_mesh = loadMesh("realistic_tree/tree.obj");
+    auto tree_mesh_lod1 = loadMesh("realistic_tree/tree_lod1.obj");  // 50% triangles
+    auto tree_mesh_lod2 = loadMesh("realistic_tree/tree_lod2.obj");  // 25% triangles
+    
     auto instructions_mesh = loadMesh("instructions_panel/quad.obj");    
     auto cube_mesh = loadMesh("cube/cube.obj");    
     auto sphere_mesh = loadMesh("sphere/sphere.obj");    
     auto cone_mesh = loadMesh("cone/cone.obj");
     auto statue_mesh = loadMesh("statue/statue_of_myself.obj");
-    auto plastic_table = loadMesh("plastic_table/plastic_table.obj");    
-    auto road_mesh = loadMesh("modular_road/modular_road_pack.obj");
-    auto character_idle = loadMesh("characters3d.com - Idle.fbx");
+    auto plastic_table = loadMesh("plastic_table/plastic_table.obj");
+    // auto character_idle = loadMesh("characters3d.com - Idle.fbx");
     
     printf("Meshes finished loading!\n");
     
@@ -629,29 +716,41 @@ int main() {
     
     // CREATE LIGHT SOURCES //
     
-    createDirLight("sun", glm::vec3(1, -1, -1), glm::vec3(1, 1, 1), 10);
-    createPointLight("streetlamp", glm::vec3(-7.05, 3.5, 0.05), glm::vec3(1, 1, 1), 250,
-                    {}, glm::vec3(0.1, 0.1, 0.1), std::vector<int>{CULL_BACK});
-    createSpotlight("torchlight", glm::vec3(0, 10, 0), glm::vec3(1, 1, 1), 50,
-                    glm::vec3(0, -1, 0), 7.5f, 17.5f,
-                    {}, glm::vec3(0.1, 0.1, 0.1), std::vector<int>{CULL_BACK});
-    
+    // createDirLight("sun", glm::vec3(1, -1, -1), glm::vec3(1, 1, 1), 10);
+    createPointLight("lamp", {{}}, glm::vec3(0, 20, 0), glm::vec3(1, 1, 1), 250,
+                    glm::vec3(1, 1, 1), std::vector<int>{CULL_BACK});
+    /* createSpotlight("spotlight", {{}}, glm::vec3(-20, 20, -20), glm::vec3(1, 1, 1), 1000,
+                    glm::vec3(1, -1, 1), 7.5f, 17.5f,
+                    glm::vec3(1, 1, 1), std::vector<int>{CULL_BACK}, false); */
+
     // Initialise shadow map
     initShadowMap();
     printf("Shadow map initialized successfully!\n");
 
     // CREATE ENTITIES //
     
-    createEntity("level", std::move(level_mesh), glm::vec3(0, 0, 0), glm::vec3(0, 0, 0), glm::vec3(10, 10, 10), std::vector<int> {CULL_NONE});
-    createEntity("tree", std::move(tree_mesh), glm::vec3(0, 0, 0), glm::vec3(0, 0, 0), glm::vec3(1, 1, 1), std::vector<int>{CULL_BACK, CULL_NONE});
-    createEntity("instructions", std::move(instructions_mesh), glm::vec3(0, 2, 4), glm::vec3(0, 0, 0), glm::vec3(1, 1, 1), std::vector<int> {CULL_NONE});
-    createEntity("cube", std::move(cube_mesh), glm::vec3(5, 3, 0), glm::vec3(0, 0, 0), glm::vec3(1, 1, 1), std::vector<int> {CULL_BACK});
-    createEntity("sphere", std::move(sphere_mesh), glm::vec3(0, 2, -5), glm::vec3(0, 0, 0), glm::vec3(1, 1, 1), std::vector<int> {CULL_BACK});
-    createEntity("cone", std::move(cone_mesh), glm::vec3(0, 10, 0), glm::vec3(0, 0, 0), glm::vec3(1, 1, 1), std::vector<int>{CULL_BACK});
-    createEntity("statue", std::move(statue_mesh), glm::vec3(-5, 1.9, -4), glm::vec3(0, 0, 0), glm::vec3(0.1, 0.1, 0.1), std::vector<int>{CULL_BACK});
-    createEntity("plastic_table", std::move(plastic_table), glm::vec3(-5, 0, -4), glm::vec3(0, 0, 0), glm::vec3(0.5, 0.5, 0.5), std::vector<int>{CULL_BACK});
-    createEntity("road", std::move(road_mesh), glm::vec3(-50, 0, 0), glm::vec3(0, 0, 0), glm::vec3(1, 1, 1), std::vector<int>{CULL_BACK});
-    // createEntity("character_idle", std::move(character_idle), glm::vec3(9, 0, 9), glm::vec3(0, 180, 0), glm::vec3(0.01, 0.01, 0.01), std::vector<int>{CULL_BACK});
+    createEntity("level", {{1000.0f, level_mesh}}, glm::vec3(0, 0, 0), glm::vec3(0, 0, 0), glm::vec3(100, 100, 100), std::vector<int> {CULL_NONE});
+    for (int i = 0; i < 10; i++) {
+        for (int j = 0; j < 10; j++) {
+            createEntity("tree",
+            {
+                {25.0f, tree_mesh},       // LOD0: full detail
+                {50.0f, tree_mesh_lod1},  // LOD1: medium detail
+                {75.0f, tree_mesh_lod2}   // LOD2: low detail
+            },
+            glm::vec3(i * 5, 0, -j * 5),
+            glm::vec3(0, 0, 0),
+            glm::vec3(1, 1, 1),
+            {CULL_BACK, CULL_NONE});
+        }
+    }
+    /* createEntity("instructions", instructions_mesh, glm::vec3(0, 2, 4), glm::vec3(0, 0, 0), glm::vec3(1, 1, 1), std::vector<int> {CULL_NONE});
+    createEntity("cube", cube_mesh, glm::vec3(5, 3, 0), glm::vec3(0, 0, 0), glm::vec3(1, 1, 1), std::vector<int> {CULL_BACK});
+    createEntity("sphere", sphere_mesh, glm::vec3(0, 2, -5), glm::vec3(0, 0, 0), glm::vec3(1, 1, 1), std::vector<int> {CULL_BACK});
+    createEntity("cone", cone_mesh, glm::vec3(50, 3, 0), glm::vec3(45, 135, 315), glm::vec3(1, 1, 1), std::vector<int>{CULL_BACK});
+    createEntity("statue", statue_mesh, glm::vec3(-5, 1.9, -4), glm::vec3(0, 0, 0), glm::vec3(0.1, 0.1, 0.1), std::vector<int>{CULL_BACK});
+    createEntity("plastic_table", plastic_table, glm::vec3(-5, 0, -4), glm::vec3(0, 0, 0), glm::vec3(0.5, 0.5, 0.5), std::vector<int>{CULL_BACK}); */
+    // createEntity("character_idle", character_idle, glm::vec3(5, 0, 5), glm::vec3(0, 0, 0), glm::vec3(0.1, 0.1, 0.1), std::vector<int>{CULL_BACK});
 
     printf("Total triangles: %d\n", total_triangles);
     printf("Active entities: %zu\n", entity_manager.size());

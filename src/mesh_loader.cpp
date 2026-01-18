@@ -1,6 +1,6 @@
 #include "mesh_loader.h"
 #include "filesystem.h"
-#include "asset_loader.h"
+#include "texture_loader.h"
 #include "material.h"
 
 #include <assimp/Importer.hpp>
@@ -264,22 +264,27 @@ Material createMaterialFromAssimp(std::string modelPath, aiMaterial* material, c
     return mat;
 }
 
-std::vector<std::unique_ptr<Mesh>> loadMesh(const std::string& filepath) {
+std::vector<std::shared_ptr<Mesh>> loadMesh(const std::string& filepath) {
     Assimp::Importer importer;
     const aiScene* scene = importer.ReadFile(buildAssetPath("res/scene_models/" + filepath),
-        aiProcess_Triangulate | aiProcess_GenSmoothNormals | aiProcess_JoinIdenticalVertices |
-        aiProcess_ImproveCacheLocality | aiProcess_OptimizeMeshes | aiProcess_CalcTangentSpace | aiProcess_PreTransformVertices);
+        aiProcess_Triangulate | 
+        aiProcess_GenSmoothNormals | 
+        aiProcess_JoinIdenticalVertices |
+        aiProcess_ImproveCacheLocality | 
+        aiProcess_OptimizeMeshes | 
+        aiProcess_CalcTangentSpace | 
+        aiProcess_PreTransformVertices);
 
     if (!scene || scene->mFlags & AI_SCENE_FLAGS_INCOMPLETE || !scene->mRootNode) {
         printf("Assimp error: %s\n", importer.GetErrorString());
         return {};
     }
 
-    std::vector<std::unique_ptr<Mesh>> meshes;
+    std::vector<std::shared_ptr<Mesh>> meshes;
     std::function<void(aiNode*)> processNode = [&](aiNode* node) {
         for (unsigned int i = 0; i < node->mNumMeshes; ++i) {
             aiMesh* mesh = scene->mMeshes[node->mMeshes[i]];
-            auto newMesh = std::make_unique<Mesh>();
+            auto newMesh = std::make_shared<Mesh>();
             
             for (unsigned int v = 0; v < mesh->mNumVertices; ++v) {
                 newMesh->vertices_data.push_back(mesh->mVertices[v].x);
@@ -370,9 +375,30 @@ std::vector<std::unique_ptr<Mesh>> loadMesh(const std::string& filepath) {
             glVertexAttribPointer(4, 3, GL_FLOAT, GL_FALSE, stride, (void*)(12 * sizeof(float)));
             glEnableVertexAttribArray(5);
             glVertexAttribPointer(5, 3, GL_FLOAT, GL_FALSE, stride, (void*)(15 * sizeof(float)));
-            glBindVertexArray(0);
 
-            meshes.push_back(std::move(newMesh));
+            // Instance matrix attribute setup
+            glGenBuffers(1, &newMesh->instanceVBO); 
+            glBindBuffer(GL_ARRAY_BUFFER, newMesh->instanceVBO);
+
+            const size_t MAX_INSTANCES = 1000;  // Maximum instances per mesh
+            newMesh->maxInstances = MAX_INSTANCES;
+
+            glBufferData(GL_ARRAY_BUFFER, MAX_INSTANCES * sizeof(glm::mat4), nullptr, GL_DYNAMIC_DRAW);
+
+            // Enable 4 slots (6, 7, 8, 9) for instance matrix
+            std::size_t matrixSize = sizeof(glm::mat4);
+            std::size_t vec4Size = sizeof(glm::vec4);
+
+            for (int i = 0; i < 4; i++) {
+                unsigned int loc = 6 + i;
+                glEnableVertexAttribArray(loc);
+                glVertexAttribPointer(loc, 4, GL_FLOAT, GL_FALSE, matrixSize, (void*)(i * vec4Size));
+                glVertexAttribDivisor(loc, 1);
+            }
+
+            glBindVertexArray(0);
+            meshes.push_back(newMesh);
+            newMesh->maxInstances = MAX_INSTANCES;
         }
 
         for (unsigned int i = 0; i < node->mNumChildren; ++i) processNode(node->mChildren[i]);

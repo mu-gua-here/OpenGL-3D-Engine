@@ -22,10 +22,6 @@ void createDirLight(std::string name, glm::vec3 direction, glm::vec3 color, int 
     light.type = DIR_LIGHT;
     light.entity_name = name;
 
-    if (lights.empty()) {
-        SHADOW_WIDTH = SHADOW_HEIGHT = 16384;
-    }
-
     if (lights.size() >= MAX_LIGHTS) {
         printf("Warning: Exceeded maximum number of lights (%d). Additional lights will be ignored in shaders.\n", MAX_LIGHTS);
         return;
@@ -35,9 +31,9 @@ void createDirLight(std::string name, glm::vec3 direction, glm::vec3 color, int 
     printf("Created directional light '%s'\n", name.c_str());
 }
 
-void createSpotlight(std::string name, glm::vec3 position, glm::vec3 color, int intensity,
-                     glm::vec3 direction, float inner_angle_deg, float outer_angle_deg,
-                     std::vector<std::unique_ptr<Mesh>>&& light_mesh, glm::vec3 scale, std::vector<int> cull_mode) {
+void createSpotlight(std::string name, const std::vector<std::pair<float, std::vector<std::shared_ptr<Mesh>>>>& lodSpecs, glm::vec3 position, glm::vec3 color, int intensity,
+                    glm::vec3 direction, float inner_angle_deg, float outer_angle_deg,
+                    glm::vec3 scale, std::vector<int> cull_mode) {
     Light light;
     light.position = position;
     light.color = color;
@@ -48,10 +44,6 @@ void createSpotlight(std::string name, glm::vec3 position, glm::vec3 color, int 
     light.type = SPOT_LIGHT;
     light.entity_name = name;
 
-    if (lights.empty()) {
-        SHADOW_WIDTH = SHADOW_HEIGHT = 4096;
-    }
-
     if (lights.size() >= MAX_LIGHTS) {
         printf("Warning: Exceeded maximum number of lights (%d). Additional lights will be ignored in shaders.\n", MAX_LIGHTS);
         return;
@@ -60,12 +52,13 @@ void createSpotlight(std::string name, glm::vec3 position, glm::vec3 color, int 
     lights.push_back(light);
     glm::vec3 rotation = convertVecToEuler(light.direction, glm::vec3(0.0f));
 
-    if (!light_mesh.empty()) createEntity(light.entity_name, std::move(light_mesh), position, rotation, scale, cull_mode);
+    if (!lodSpecs.empty()) createEntity(light.entity_name, lodSpecs, light.position, rotation, scale, cull_mode);
     printf("Created spotlight '%s' with cone angles %.1f-%.1f degrees\n", name.c_str(), inner_angle_deg, outer_angle_deg);
 }
 
-void createPointLight(std::string name, glm::vec3 position, glm::vec3 color, int intensity,
-                      std::vector<std::unique_ptr<Mesh>>&& light_mesh, glm::vec3 scale, std::vector<int> cull_mode) {
+void createPointLight(std::string name, const std::vector<std::pair<float, std::vector<std::shared_ptr<Mesh>>>>& lodSpecs,
+                      glm::vec3 position, glm::vec3 color, int intensity,
+                      glm::vec3 scale, std::vector<int> cull_mode) {
     Light light;
     light.position = position;
     light.color = color;
@@ -76,10 +69,6 @@ void createPointLight(std::string name, glm::vec3 position, glm::vec3 color, int
     light.outer_cutoff_cos = -1.0f;
     light.type = POINT_LIGHT;
     light.entity_name = name;
-    
-    if (lights.empty()) {
-        SHADOW_WIDTH = SHADOW_HEIGHT = 8192;
-    }
 
     if (lights.size() >= MAX_LIGHTS) {
         printf("Warning: Exceeded maximum number of lights (%d). Additional lights will be ignored in shaders.\n", MAX_LIGHTS);
@@ -87,7 +76,7 @@ void createPointLight(std::string name, glm::vec3 position, glm::vec3 color, int
     }
 
     lights.push_back(light);
-    if (!light_mesh.empty()) createEntity(light.entity_name, std::move(light_mesh), position, light.direction, scale, cull_mode);
+    if (!lodSpecs.empty()) createEntity(light.entity_name, lodSpecs, position, glm::vec3(0.0f), scale, cull_mode);
     printf("Created point light '%s' with intensity %d\n", name.c_str(), intensity);
 }
 

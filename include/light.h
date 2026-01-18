@@ -41,14 +41,16 @@ extern unsigned int SHADOW_HEIGHT;
 
 // Forward declarations for functions that will be defined in main.cpp
 // These are called by light functions
-void createEntity(std::string name, std::vector<std::unique_ptr<Mesh>>&& meshes, glm::vec3 pos, glm::vec3 rot, glm::vec3 scale, std::vector<int> cull_mode);
+void createEntity(std::string name, const std::vector<std::pair<float, std::vector<std::shared_ptr<Mesh>>>>& lodSpecs, glm::vec3 pos, glm::vec3 rotation, glm::vec3 scale, std::vector<int> cull_modes);
 
 // Light system functions
 glm::vec3 convertVecToEuler(glm::vec3 direction, glm::vec3 offset);
+
 void createDirLight(std::string name, glm::vec3 direction, glm::vec3 color, int intensity);
-void createSpotlight(std::string name, glm::vec3 position, glm::vec3 color, int intensity,
-                     glm::vec3 direction, float inner_angle_deg, float outer_angle_deg,
-                     std::vector<std::unique_ptr<class Mesh>>&& light_mesh, glm::vec3 scale, std::vector<int> cull_mode);
-void createPointLight(std::string name, glm::vec3 position, glm::vec3 color, int intensity,
-                      std::vector<std::unique_ptr<class Mesh>>&& light_mesh, glm::vec3 scale, std::vector<int> cull_mode);
+void createSpotlight(std::string name, const std::vector<std::pair<float, std::vector<std::shared_ptr<Mesh>>>>& lodSpecs, glm::vec3 position, glm::vec3 color, int intensity,
+                    glm::vec3 direction, float inner_angle_deg, float outer_angle_deg,
+                    glm::vec3 scale, std::vector<int> cull_mode);
+void createPointLight(std::string name, const std::vector<std::pair<float, std::vector<std::shared_ptr<Mesh>>>>& lodSpecs,
+                      glm::vec3 position, glm::vec3 color, int intensity,
+                      glm::vec3 scale, std::vector<int> cull_mode);
 void updateLight(std::string name, glm::vec3 position, glm::vec3 color, int intensity, glm::vec3 rotation);

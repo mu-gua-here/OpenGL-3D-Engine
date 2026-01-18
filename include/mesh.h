@@ -20,12 +20,16 @@ public:
     
     unsigned int TRIANGLE_COUNT;
     unsigned int INDEX_COUNT;
-    GLuint VAO, VBO, EBO;
+    GLuint VAO, VBO, EBO, instanceVBO;
     Material material;
     int cull_mode;
     bool is_cleaned_up;
     
-    Mesh() : TRIANGLE_COUNT(0), VAO(0), VBO(0), EBO(0), cull_mode(CULL_NONE), is_cleaned_up(false) {
+    // NEW: Instance buffer properties
+    size_t maxInstances = 1000;
+    
+    Mesh() : TRIANGLE_COUNT(0), VAO(0), VBO(0), EBO(0), instanceVBO(0), 
+             cull_mode(CULL_NONE), is_cleaned_up(false) {
         material = createDefaultMaterial();
     }
     
@@ -45,7 +49,8 @@ public:
         if (VAO != 0) { glDeleteVertexArrays(1, &VAO); VAO = 0; }
         if (VBO != 0) { glDeleteBuffers(1, &VBO); VBO = 0; }
         if (EBO != 0) { glDeleteBuffers(1, &EBO); EBO = 0; }
-        
+        if (instanceVBO != 0) { glDeleteBuffers(1, &instanceVBO); instanceVBO = 0; }
+
         TRIANGLE_COUNT = INDEX_COUNT = 0;
         is_cleaned_up = true;
     }

@@ -30,12 +30,19 @@ endif()
 # Compiler flags
 if(MSVC)
     set(CMAKE_CXX_FLAGS_DEBUG "/Od /Zi /DEBUG")
-    set(CMAKE_CXX_FLAGS_RELEASE "/O2 /DNDEBUG")
+    set(CMAKE_CXX_FLAGS_RELEASE "/O2 /Oi /Ot /GL /DNDEBUG")
+    set(CMAKE_EXE_LINKER_FLAGS_RELEASE "${CMAKE_EXE_LINKER_FLAGS_RELEASE} /LTCG")
     add_definitions(-D_USE_MATH_DEFINES -DNOMINMAX)
     add_compile_options(/wd4244 /wd4005 /W3)
 elseif(NOT EMSCRIPTEN)
     set(CMAKE_CXX_FLAGS_DEBUG "-g -O0 -Wall -Wextra")
-    set(CMAKE_CXX_FLAGS_RELEASE "-O3 -DNDEBUG")
+    set(CMAKE_CXX_FLAGS_RELEASE "-O3 -DNDEBUG -march=native -flto -ffast-math")
+    set(CMAKE_EXE_LINKER_FLAGS_RELEASE "-flto")
+    
+    # Add these macOS-specific optimizations
+    if(APPLE)
+        set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -mtune=native")
+    endif()
 endif()
 
 # Output directories
@@ -54,7 +61,7 @@ add_executable(${PROJECT_NAME}
     src/filesystem.cpp
     src/skybox.cpp
     src/camera.cpp
-    src/asset_loader.cpp
+    src/texture_loader.cpp
     src/mesh_loader.cpp
     src/light.cpp
     src/entity_manager.cpp

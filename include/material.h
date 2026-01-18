@@ -8,9 +8,16 @@
 // Forward declaration
 extern GLuint default_texture_id;
 
+enum AlphaMode {
+    OPAQUE,   // No transparency - fastest
+    MASKED,   // Alpha cutout - No sorting needed
+    BLEND     // True transparency - Needs sorting
+};
+
 class Material {
 public:
     std::string name;
+    AlphaMode alphaMode = OPAQUE;
     
     // PBR properties with proper defaults
     glm::vec3 base_color{1.0f, 1.0f, 1.0f};

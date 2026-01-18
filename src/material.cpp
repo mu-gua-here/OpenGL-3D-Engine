@@ -1,9 +1,5 @@
 #include "../include/material.h"
 
-// Default Constructor - these are inlined in the header now
-// Material::Material() {}
-// Material::Material(const std::string& name) : name(name) {}
-
 // Function implementations
 Material createDefaultMaterial() {
     Material default_mat;

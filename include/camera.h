@@ -6,6 +6,7 @@
 
 typedef struct {
     glm::vec3 position;
+    glm::vec3 velocity;
     glm::vec3 front;
     glm::vec3 up;
     glm::vec3 right;
@@ -15,11 +16,14 @@ typedef struct {
     float aspect_ratio;
     float near_plane;
     float far_plane;
+    float speed_multiplier;
+    float friction;
 } Camera;
 
 inline Camera create_camera(float aspect) {
     Camera cam;
     cam.position = glm::vec3(0, 2, 9);
+    cam.velocity = glm::vec3(0, 0, 0);
     cam.front = glm::vec3(0, 0, -1);
     cam.up = glm::vec3(0, 1, 0);
     cam.right = glm::vec3(1, 0, 0);
@@ -28,7 +32,9 @@ inline Camera create_camera(float aspect) {
     cam.fov = glm::radians(45.0f);
     cam.aspect_ratio = aspect;
     cam.near_plane = 0.1f;
-    cam.far_plane = 200.0f;
+    cam.far_plane = 200.0f; 
+    cam.speed_multiplier = 0.5f;
+    cam.friction = 0.9f;
     return cam;
 }
 
