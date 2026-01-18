@@ -309,7 +309,110 @@ void Renderer::drawMesh(Entity* entity, Mesh* mesh, int shadowLightIndex) {
     glDrawElements(GL_TRIANGLES, mesh->INDEX_COUNT, GL_UNSIGNED_INT, 0);
     glBindVertexArray(0);
 
-    // Reset to texture unit 0
+    glActiveTexture(GL_TEXTURE0);
+}
+
+void Renderer::renderSceneOptimized(EntityManager& entity_manager, int shadowLightIndex) {
+    // Frustum culling
+    Frustum frustum;
+    frustum.extractFromMatrix(projection * view);
+    
+    // Group by material, then mesh
+    std::unordered_map<const Material*, std::unordered_map<Mesh*, std::vector<glm::mat4>>, 
+                       MaterialHash, MaterialEqual> materialBatches;
+    
+    for (size_t i = 0; i < entity_manager.size(); i++) {
+        Entity* entity = entity_manager.getEntityAt(i);
+        if (!entity || !entity->active) continue;
+
+        // Skip lights
+        bool is_light = false;
+        for (const auto& light : lights) {
+            if (entity->name == light.entity_name) {
+                is_light = true;
+                break;
+            }
+        }
+        if (is_light) continue;
+
+        // Frustum cull with bounding sphere
+        float radius = glm::length(entity->scale) * 15.0f;
+        if (!frustum.sphereInFrustum(entity->position, radius)) continue;
+
+        glm::mat4 model = entity->getModelMatrix(entity);
+        for (auto& meshPtr : entity->meshes) {
+            if (meshPtr && meshPtr->isValid()) {
+                materialBatches[&meshPtr->material][meshPtr.get()].push_back(model);
+            }
+        }
+    }
+
+    // Set shadow light index ONCE before rendering
+    pbr_shader->setInt("shadowLightIndex", shadowLightIndex);
+    
+    // Track state to minimize changes
+    int lastCullMode = -1;
+    
+    // Render by material to minimize texture binding
+    for (auto& [material, meshBatches] : materialBatches) {
+        // Bind all textures for this material ONCE
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, material->hasAlbedoMap() ? material->albedo_map : default_texture_id);
+        pbr_shader->setInt("albedoMap", 0);
+        pbr_shader->setInt("hasAlbedoMap", material->hasAlbedoMap() ? 1 : 0);
+        
+        glActiveTexture(GL_TEXTURE1);
+        glBindTexture(GL_TEXTURE_2D, material->hasNormalMap() ? material->normal_map : default_texture_id);
+        pbr_shader->setInt("normalMap", 1);
+        pbr_shader->setInt("hasNormalMap", material->hasNormalMap() ? 1 : 0);
+
+        glActiveTexture(GL_TEXTURE2);
+        glBindTexture(GL_TEXTURE_2D, material->hasORMMap() ? material->orm_map : default_texture_id);
+        pbr_shader->setInt("ormMap", 2);
+        pbr_shader->setInt("hasORMMap", material->hasORMMap() ? 1 : 0);
+        pbr_shader->setInt("hasHeightMap", material->hasHeightMap() ? 1 : 0);
+
+        glActiveTexture(GL_TEXTURE3);
+        glBindTexture(GL_TEXTURE_2D, material->hasEmissiveMap() ? material->emissive_map : default_texture_id);
+        pbr_shader->setInt("emissiveMap", 3);
+        pbr_shader->setInt("hasEmissiveMap", material->hasEmissiveMap() ? 1 : 0);
+
+        // Ensure shadow map stays bound at texture unit 4
+        glActiveTexture(GL_TEXTURE4);
+        glBindTexture(GL_TEXTURE_2D, shadowMapTexture);
+        pbr_shader->setInt("shadowMap", 4);
+
+        // Set material properties once
+        pbr_shader->setVec3("baseColor", material->base_color);
+        pbr_shader->setFloat("metallic", material->metallic);
+        pbr_shader->setFloat("roughness", material->roughness);
+        pbr_shader->setFloat("ao", material->ao);
+        pbr_shader->setVec3("emissive", material->emissive);
+        pbr_shader->setFloat("heightScale", material->height_scale);
+
+        // Draw all meshes with this material
+        for (auto& [mesh, matrices] : meshBatches) {
+            if (matrices.empty()) continue;
+
+            // Only change cull mode when needed
+            if (mesh->cull_mode != lastCullMode) {
+                switch (mesh->cull_mode) {
+                    case CULL_NONE: glDisable(GL_CULL_FACE); break;
+                    case CULL_BACK: glEnable(GL_CULL_FACE); glCullFace(GL_BACK); break;
+                    case CULL_FRONT: glEnable(GL_CULL_FACE); glCullFace(GL_FRONT); break;
+                }
+                lastCullMode = mesh->cull_mode;
+            }
+
+            glBindBuffer(GL_ARRAY_BUFFER, mesh->instanceVBO);
+            glBufferData(GL_ARRAY_BUFFER, matrices.size() * sizeof(glm::mat4), matrices.data(), GL_DYNAMIC_DRAW);
+
+            glBindVertexArray(mesh->VAO);
+            glDrawElementsInstanced(GL_TRIANGLES, mesh->INDEX_COUNT, GL_UNSIGNED_INT, 0, matrices.size());
+        }
+    }
+
+    glBindVertexArray(0);
     glActiveTexture(GL_TEXTURE0);
 }
 
