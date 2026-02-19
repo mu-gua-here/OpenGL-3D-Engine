@@ -44,13 +44,11 @@ extern unsigned int SHADOW_HEIGHT;
 void createEntity(std::string name, const std::vector<std::pair<float, std::vector<std::shared_ptr<Mesh>>>>& lodSpecs, glm::vec3 pos, glm::vec3 rotation, glm::vec3 scale, std::vector<int> cull_modes);
 
 // Light system functions
-glm::vec3 convertVecToEuler(glm::vec3 direction, glm::vec3 offset);
-
 void createDirLight(std::string name, glm::vec3 direction, glm::vec3 color, int intensity);
 void createSpotlight(std::string name, const std::vector<std::pair<float, std::vector<std::shared_ptr<Mesh>>>>& lodSpecs, glm::vec3 position, glm::vec3 color, int intensity,
-                    glm::vec3 direction, float inner_angle_deg, float outer_angle_deg,
+                    glm::vec3 light_dir, glm::vec3 offset,
+                    float inner_angle_deg, float outer_angle_deg,
                     glm::vec3 scale, std::vector<int> cull_mode);
-void createPointLight(std::string name, const std::vector<std::pair<float, std::vector<std::shared_ptr<Mesh>>>>& lodSpecs,
-                      glm::vec3 position, glm::vec3 color, int intensity,
-                      glm::vec3 scale, std::vector<int> cull_mode);
+void createPointLight(std::string name, const std::vector<std::pair<float, std::vector<std::shared_ptr<Mesh>>>>& lodSpecs, glm::vec3 position, glm::vec3 color, int intensity,
+                      glm::vec3 offset, glm::vec3 scale, std::vector<int> cull_mode);
 void updateLight(std::string name, glm::vec3 position, glm::vec3 color, int intensity, glm::vec3 rotation);

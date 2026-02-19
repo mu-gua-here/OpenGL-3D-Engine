@@ -34,7 +34,10 @@ std::string loadShaderFile(const std::string& path) {
     #ifdef __EMSCRIPTEN__
         version_string = "#version 300 es\n"
                         "precision highp float;\n"
-                        "precision highp int;\n";
+                        "precision highp int;\n"
+                        "precision highp sampler2D;\n"
+                        "precision highp sampler2DShadow;\n"
+                        "precision highp samplerCube;\n";
     #else
         version_string = "#version 330 core\n";
     #endif

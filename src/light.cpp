@@ -4,12 +4,22 @@
 
 std::vector<Light> lights;
 
-glm::vec3 convertVecToEuler(glm::vec3 direction, glm::vec3 offset) {
-    glm::mat4 rotationMatrix = glm::inverse(glm::lookAt(glm::vec3(0, 0, 0), direction, glm::vec3(0.0f, 1.0f, 0.0f)));
+glm::vec3 convertVecToEuler(glm::vec3 direction) {
+    direction = glm::normalize(direction);
+    glm::vec3 up = glm::vec3(0.0f, 1.0f, 0.0f);
+
+    // 3. Check if direction is parallel to up vector
+    float dot = glm::dot(direction, up);
+    if (glm::abs(dot) > 0.9999f) up = glm::vec3(0.0f, 0.0f, 1.0f);
+
+    // Create the rotation matrix
+    glm::mat4 rotationMatrix = glm::inverse(glm::lookAt(glm::vec3(0, 0, 0), direction, up));
+
+    // Extract Euler angles
     float yaw, pitch, roll;
     glm::extractEulerAngleZYX(rotationMatrix, yaw, pitch, roll);
-    glm::vec3 euler_rot = glm::vec3(glm::degrees(roll) + offset.x, glm::degrees(pitch) + offset.y, glm::degrees(yaw) + offset.z);
-    return euler_rot;
+
+    return glm::vec3(glm::degrees(roll), glm::degrees(pitch), glm::degrees(yaw));
 }
 
 void createDirLight(std::string name, glm::vec3 direction, glm::vec3 color, int intensity) {
@@ -32,13 +42,14 @@ void createDirLight(std::string name, glm::vec3 direction, glm::vec3 color, int 
 }
 
 void createSpotlight(std::string name, const std::vector<std::pair<float, std::vector<std::shared_ptr<Mesh>>>>& lodSpecs, glm::vec3 position, glm::vec3 color, int intensity,
-                    glm::vec3 direction, float inner_angle_deg, float outer_angle_deg,
+                    glm::vec3 light_dir, glm::vec3 offset,
+                    float inner_angle_deg, float outer_angle_deg,
                     glm::vec3 scale, std::vector<int> cull_mode) {
     Light light;
     light.position = position;
     light.color = color;
     light.intensity = intensity;
-    light.direction = glm::normalize(direction);
+    light.direction = glm::normalize(light_dir);
     light.inner_cutoff_cos = glm::cos(glm::radians(inner_angle_deg));
     light.outer_cutoff_cos = glm::cos(glm::radians(outer_angle_deg));
     light.type = SPOT_LIGHT;
@@ -50,21 +61,25 @@ void createSpotlight(std::string name, const std::vector<std::pair<float, std::v
     }
 
     lights.push_back(light);
-    glm::vec3 rotation = convertVecToEuler(light.direction, glm::vec3(0.0f));
 
-    if (!lodSpecs.empty()) createEntity(light.entity_name, lodSpecs, light.position, rotation, scale, cull_mode);
+    if (!lodSpecs.empty()) {
+        glm::vec3 euler_rot = convertVecToEuler(light_dir);
+        printf("Mesh direction: (%.2f, %.2f, %.2f) -> Euler (%.2f, %.2f, %.2f)\n", offset.x, offset.y, offset.z,
+               euler_rot.x, euler_rot.y, euler_rot.z);
+        createEntity(name, lodSpecs, position, euler_rot + offset, scale, cull_mode);
+    }
     printf("Created spotlight '%s' with cone angles %.1f-%.1f degrees\n", name.c_str(), inner_angle_deg, outer_angle_deg);
 }
 
-void createPointLight(std::string name, const std::vector<std::pair<float, std::vector<std::shared_ptr<Mesh>>>>& lodSpecs,
-                      glm::vec3 position, glm::vec3 color, int intensity,
-                      glm::vec3 scale, std::vector<int> cull_mode) {
+void createPointLight(std::string name, const std::vector<std::pair<float, std::vector<std::shared_ptr<Mesh>>>>& lodSpecs, glm::vec3 position, glm::vec3 color, int intensity,
+                      glm::vec3 offset, glm::vec3 scale, std::vector<int> cull_mode) {
     Light light;
     light.position = position;
     light.color = color;
     light.intensity = intensity;
     
-    light.direction = glm::vec3(0.0f, -1.0f, 0.0f);
+    // Light direction doesn't apply to point lights, can use arbitrary value
+    light.direction = glm::vec3(0.0f, 0.0f, 0.0f);
     light.inner_cutoff_cos = -1.0f;
     light.outer_cutoff_cos = -1.0f;
     light.type = POINT_LIGHT;
@@ -76,7 +91,10 @@ void createPointLight(std::string name, const std::vector<std::pair<float, std::
     }
 
     lights.push_back(light);
-    if (!lodSpecs.empty()) createEntity(light.entity_name, lodSpecs, position, glm::vec3(0.0f), scale, cull_mode);
+
+    if (!lodSpecs.empty()) {
+        createEntity(name, lodSpecs, position, offset, scale, cull_mode);
+    }
     printf("Created point light '%s' with intensity %d\n", name.c_str(), intensity);
 }
 

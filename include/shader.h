@@ -70,6 +70,14 @@ public:
     void setFloat(const std::string& name, float value) const {
         glUniform1f(getUniformLocation(name), value);
     }
+
+    void setBool(const std::string& name, bool value) const {
+        glUniform1i(getUniformLocation(name), value ? 1 : 0);
+    }
+
+    void setVec2(const std::string& name, const glm::vec2& value) const {
+        glUniform2fv(getUniformLocation(name), 1, glm::value_ptr(value));
+    }
     
     void setVec3Array(const std::string& name, const std::vector<glm::vec3>& values) const {
         glUniform3fv(getUniformLocation(name), static_cast<GLsizei>(values.size()),

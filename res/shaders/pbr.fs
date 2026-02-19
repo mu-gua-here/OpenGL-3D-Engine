@@ -43,6 +43,19 @@ uniform float lightInnerCutoffs[MAX_LIGHTS];
 uniform float lightOuterCutoffs[MAX_LIGHTS];
 uniform float lightTypes[MAX_LIGHTS];
 
+// Fog parameters
+uniform bool enableFog;
+uniform vec3 fogColor;
+uniform float fogStart;
+uniform float fogEnd;
+
+// Ambient lighting (replaces skybox IBL)
+uniform vec3 ambientColor;
+uniform float ambientIntensity;
+
+// Render detail level (0 = low, 1 = medium, 2 = high)
+uniform int renderDetailLevel;
+
 const float PI = 3.14159265359;
 
 // PARALLAX OCCLUSION MAPPING
@@ -73,71 +86,71 @@ vec2 parallaxMapping(vec2 texCoords, vec3 viewDir) {
     return finalTexCoords;
 }
 
+// IGN NOISE FUNCTION
+float InterleavedGradientNoise(vec2 uv) {
+    vec3 magic = vec3(0.06711056, 0.00583715, 52.9829189);
+    return fract(magic.z * fract(dot(uv, magic.xy)));
+}
+
 // SHADOW MAPPING
-float calcShadow(vec4 fragLight, vec3 N, vec3 L) {
+float calcShadow(vec4 fragLight, vec3 N, vec3 L, vec3 lightColor) {
     if (shadowLightIndex < 0) return 1.0;
 
-    vec3 offsetPos = FragPos + N * 0.1;
-    vec4 offsetLight = lightSpaceMatrix * vec4(offsetPos, 1.0);
+    // Perspective divide
+    vec3 proj = fragLight.xyz / fragLight.w;
     
-    vec3 proj = offsetLight.xyz / offsetLight.w;
+    // Transform to [0,1] range
     proj = proj * 0.5 + 0.5;
 
-    if (proj.z > 1.0 || proj.z < 0.0 || 
-        proj.x > 1.0 || proj.x < 0.0 || 
-        proj.y > 1.0 || proj.y < 0.0) {
-        return 1.0;
+    // Check if fragment is outside shadow map bounds
+    if (proj.z > 1.0 || proj.x < 0.0 || proj.x > 1.0 || proj.y < 0.0 || proj.y > 1.0) {
+        return 1.0;  // No shadow outside frustum
     }
 
+    // Adaptive bias: smaller for distant surfaces (less acne), larger for close surfaces (less peter-panning)
     float cosTheta = max(dot(N, L), 0.0);
-    float bias = max(0.005 * (1.0 - cosTheta), 0.001);
-
+    float bias = mix(0.0002, 0.002, cosTheta);  // Distance-adaptive bias
+    
+    // Get texel size for PCF
     vec2 texelSize = 1.0 / vec2(textureSize(shadowMap, 0));
     
-    // Quick 4-tap test first
-    vec2 quickSamples[4] = vec2[](
-        vec2(-1.0, -1.0),
-        vec2(1.0, -1.0),
-        vec2(-1.0, 1.0),
-        vec2(1.0, 1.0)
-    );
+    // PCF with rotated Poisson sampling
+    float noise = InterleavedGradientNoise(gl_FragCoord.xy);
+    float angle = noise * 6.283185;
+    float s = sin(angle);
+    float c = cos(angle);
+    mat2 rotation = mat2(c, -s, s, c);
     
-    float quickShadow = 0.0;
-    for (int i = 0; i < 4; i++) {
-        vec2 offset = quickSamples[i] * texelSize * 2.0;
-        quickShadow += texture(shadowMap, vec3(proj.xy + offset, proj.z - bias));
-    }
-    quickShadow /= 4.0;
-    
-    // If all 4 samples agree, skip expensive sampling
-    if (quickShadow < 0.01 || quickShadow > 0.99) {
-        // Fade out near edges
-        vec2 border = min(proj.xy, 1.0 - proj.xy);
-        float fade = smoothstep(0.0, 0.1, min(border.x, border.y));
-        
-        return mix(1.0, quickShadow, fade);
-    }
-    
-    // Poisson disk samples to reduce aliasing (6 samples)
-    vec2 poissonDisk[6] = vec2[](
+    vec2 poissonDisk[8] = vec2[](
         vec2(-0.94201624, -0.39906216),
         vec2(0.94558609, -0.76890725),
         vec2(-0.094184101, -0.92938870),
         vec2(0.34495938, 0.29387760),
         vec2(-0.91588581, 0.45771432),
-        vec2(-0.81544232, -0.87912464)
+        vec2(-0.81544232, -0.87912464),
+        vec2(-0.38277543, 0.27676845),
+        vec2(0.97484398, 0.75648379)
     );
-
+    
     float shadow = 0.0;
-    for (int i = 0; i < 6; ++i) {
-        vec2 offset = poissonDisk[i] * texelSize * 2.0;
+    // Distance-aware filter: smaller radius = sharper shadows, more aliasing
+    float distanceFromLight = length(FragPosLightSpace.xyz);
+    float filterRadius = 0.8 + distanceFromLight * 0.02;  // Increase slightly with distance to hide aliasing
+    
+    for (int i = 0; i < 8; i++) {
+        vec2 offset = rotation * poissonDisk[i] * texelSize * filterRadius;
         shadow += texture(shadowMap, vec3(proj.xy + offset, proj.z - bias));
     }
-    shadow /= 6.0;
+    shadow /= 8.0;
     
-    // Fade out near edges
-    vec2 border = min(proj.xy, 1.0 - proj.xy);
-    float fade = smoothstep(0.0, 0.1, min(border.x, border.y));
+    // Smooth fade at shadow map edges
+    vec2 edgeFade = smoothstep(0.0, 0.05, proj.xy) * (1.0 - smoothstep(0.95, 1.0, proj.xy));
+    float fade = edgeFade.x * edgeFade.y;
+    
+    // Brightness-aware shadow softening: shadows are less harsh in bright areas
+    float lightBrightness = dot(lightColor, vec3(0.299, 0.587, 0.114));
+    float shadowSoftness = mix(0.6, 0.9, lightBrightness);  // Brighter lights = softer shadows
+    shadow = mix(shadow, 1.0, 1.0 - shadowSoftness);  // Blend towards 1.0 (less shadow)
     
     return mix(1.0, shadow, fade);
 }
@@ -185,49 +198,40 @@ void main() {
     }
 
     vec3 Vworld = normalize(viewPos - FragPos);
-    float distToCam = length(Vworld);
-
-    if (distToCam > 25.0) {
-        vec3 albedo = hasAlbedoMap ? texture(albedoMap, TexCoord).rgb : baseColor;
-        vec3 N = normalize(Normal);
-        if (!gl_FrontFacing) N = -N;
-        
-        // Simple directional light only (no PBR, no shadows)
-        vec3 L = normalize(-lightDirections[0]);
-        float NdotL = max(dot(N, L), 0.0);
-        vec3 color = albedo * lightColors[0] * (lightIntensities[0] * 0.01) * NdotL;
-        color += vec3(0.2) * albedo;  // Ambient
-        
-        FragColor = vec4(pow(color, vec3(1.0/2.2)), 1.0);
-        return;  // Skip expensive PBR
-    }
+    float distToCam = length(viewPos - FragPos);
     
-    // Do parallax before sampling textures
-    if (hasHeightMap && heightScale > 0.001 && distToCam < 20.0) {
+    // Determine detail blend: 1.0 = full detail, 0.0 = no detail (smooth transition)
+    float detailBlend = (renderDetailLevel == 0) ? 0.0 : 1.0 - smoothstep(30.0, 50.0, distToCam);
+    
+    // Skip expensive parallax mapping when far
+    bool useParallax = (detailBlend > 0.7) && hasHeightMap && heightScale > 0.001 && distToCam < 20.0;
+    
+    if (useParallax) {
         vec3 Vts = normalize(transpose(TBN) * Vworld);
         if (abs(Vts.z) > 0.001) {
             uv = parallaxMapping(TexCoord, Vts);
         }
     }
     
-    // Now sample everything else (only runs for visible pixels)
+    // Sample base textures
     vec4 albedoSample = hasAlbedoMap ? texture(albedoMap, uv) : vec4(baseColor, 1.0);
     vec3 albedo = albedoSample.rgb;
     
-    vec3 ormSample = hasORMMap ? texture(ormMap, uv).rgb : vec3(ao, roughness, metallic);
-    float aoValue = ormSample.r;
-    float roughValue = clamp(ormSample.g, 0.04, 1.0);
-    float metalValue = clamp(ormSample.b, 0.0, 1.0);
-    
-    vec3 emissiveCol = hasEmissiveMap ? texture(emissiveMap, uv).rgb : emissive;
-    
     vec3 N = normalize(Normal);
-    if (hasNormalMap) {
+    if (hasNormalMap && detailBlend > 0.7) {
         vec3 nt = texture(normalMap, uv).rgb * 2.0 - 1.0;
         N = normalize(TBN * nt);
     }
     
     if (!gl_FrontFacing) N = -N;
+    
+    // Sample material properties
+    vec3 ormSample = (detailBlend > 0.5 && hasORMMap) ? texture(ormMap, uv).rgb : vec3(ao, roughness, metallic);
+    float aoValue = ormSample.r;
+    float roughValue = clamp(ormSample.g, 0.04, 1.0);
+    float metalValue = clamp(ormSample.b, 0.0, 1.0);
+    
+    vec3 emissiveCol = (detailBlend > 0.7 && hasEmissiveMap) ? texture(emissiveMap, uv).rgb : emissive;
     
     vec3 V = normalize(Vworld);
     vec3 F0 = mix(vec3(0.04), albedo, metalValue);
@@ -270,17 +274,25 @@ void main() {
         float denominator = 4.0 * max(dot(N, V), 0.0) * max(dot(N, L), 0.0) + 0.0001;
         vec3 specular = numerator / denominator;
         
-        float shadow = (i == shadowLightIndex) ? calcShadow(FragPosLightSpace, N, L) : 1.0;
+        float shadow = (i == shadowLightIndex) ? calcShadow(FragPosLightSpace, N, L, lightColors[i]) : 1.0;
         
         float NdotL = max(dot(N, L), 0.0);
         Lo += (kD * albedo / PI + specular) * radiance * NdotL * shadow;
     }
     
-    vec3 ambient = vec3(0.03) * albedo * aoValue;
+    vec3 ambient = ambientColor * ambientIntensity * albedo * aoValue;
     vec3 color = ambient + Lo + emissiveCol;
     
     color = color / (color + vec3(1.0));
     color = pow(color, vec3(1.0 / 2.2));
+    
+    // Apply fog effect
+    if (enableFog) {
+        float distance = length(viewPos - FragPos);
+        if (distance > fogEnd) discard;  // Fully fogged out
+        float fogFactor = clamp((fogEnd - distance) / (fogEnd - fogStart), 0.0, 1.0);
+        color = mix(fogColor, color, fogFactor);
+    }
 
     FragColor = vec4(color, 1.0);
 }

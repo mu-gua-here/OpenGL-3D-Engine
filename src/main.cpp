@@ -22,8 +22,7 @@
  
  BUGS & IMPROVEMENTS LIST
  1. Fix ImGui window mouse interaction
- 2. Use cascaded shadow maps for bigger shadow view distance
- 3. Passing meshes into light sources breaks the entire scene
+ 2. Fix up Enscripten build and test on Web
 
  NOTES FOR OTHER DEVELOPERS
  1. If you try to export the textures here elsewhere it might look strange because I'd flipped the textures for them to work in OpenGL
@@ -79,6 +78,7 @@ void framebuffer_size_callback(GLFWwindow* window, int width, int height);
 #include "shader.h"
 #include "shadowmap.h"
 #include "skybox.h"
+#include "bloom.h"
 
 // ============================================================================
 // GLOBAL VARIABLES
@@ -116,7 +116,6 @@ glm::mat4 projection;
 Camera global_camera;
 
 // Scene stats
-unsigned int total_triangles = 0;
 unsigned int entity_count = 0;
 
 // Shadow mapping (defined in shadowmap.cpp)
@@ -239,11 +238,11 @@ void emscripten_main_loop_callback() {
     
     GLFWwindow* window = g_app_context->window;
     Renderer* renderer = g_app_context->renderer.get();
-    Skybox* skybox = g_skybox;
+    // Skybox* skybox = g_skybox;
     
     // Show loading screen during initialization
     if (!initialization_complete) {
-        glClearColor(0.05f, 0.05f, 0.05f, 1.0f);
+        glClearColor(renderer->fogColor.x, renderer->fogColor.y, renderer->fogColor.z, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         
         ImGui_ImplOpenGL3_NewFrame();
@@ -329,7 +328,9 @@ void emscripten_main_loop_callback() {
         update_count += frame_time * 60.0f;
     }
     
-    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    // Start with MSAA framebuffer
+    glBindFramebuffer(GL_FRAMEBUFFER, renderer->msaaFBO);
+    glClearColor(renderer->fogColor.x, renderer->fogColor.y, renderer->fogColor.z, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     
     // GPU timing queries - only on native platforms
@@ -354,36 +355,21 @@ void emscripten_main_loop_callback() {
         glBeginQuery(GL_TIME_ELAPSED, mainQueries[queryIndex]);
     #endif
 
+    // RENDER SCENE //
+
     // Frustum culling and cache visible entities
     renderer->cullEntities(entity_manager, projection * view);
     
-    // Eliminate overdraw by using depth pre-pass
-    renderer->renderDepthPrepass();  // Use cached entities
+    if (renderer->depthPrepassEnabled) renderer->renderDepthPrepass();
     
-    renderer->setGlobalUniforms(global_camera, shadowLightIndex);
-    
-    // Render light sources as unlit objects
-    for (size_t i = 0; i < entity_manager.size(); i++) {
-        Entity* entity = entity_manager.getEntityAt(i);
-        if (!entity || !entity->active) continue;
-
-        for (const auto& light : lights) {
-            if (entity->name == light.entity_name) {
-                for (const auto& meshPtr : entity->meshes) {
-                    if (meshPtr && meshPtr->isValid()) {
-                        renderer->drawUnlitMesh(entity, meshPtr.get(), light.color, light.intensity);
-                    }
-                }
-                break; 
-            }
-        }
-    }
-
     // Render rest of the scene
-    renderer->renderScene(entity_manager);  // Use cached entities
+    renderer->renderPBRMeshes(global_camera, shadowLightIndex, entity_manager);
 
-    // Render skybox last
-    skybox->render(&global_camera);
+    // Render light sources as unlit objects
+    renderer->renderUnlitMeshes(entity_manager);
+
+    // Skip skybox rendering since fog will fill the background
+    // skybox->render(&global_camera);
 
     #ifndef __EMSCRIPTEN__
         glEndQuery(GL_TIME_ELAPSED);
@@ -391,25 +377,37 @@ void emscripten_main_loop_callback() {
         prevIndex = 1 - queryIndex;
     #endif
 
+    // Apply bloom post-processing to the rendered scene
+    int fb_width, fb_height;
+    glfwGetFramebufferSize(window, &fb_width, &fb_height);
+    if (renderer->bloomIntensity > 0.01f && renderer->bloomEnabled) {
+        renderer->applyBloomPostProcess(fb_width, fb_height);
+    }
+
     glfwPollEvents();
 
-    // Handle mouse input for pausing/unpausing
+    // Handle ESC to unlock cursor and show ImGui
+    static bool prevEscPressed = false;
+    if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS && !prevEscPressed) {
+        glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+        firstMouse = true;  // Reset mouse state when exiting pointer lock
+        prevEscPressed = true;
+    } else if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_RELEASE) {
+        prevEscPressed = false;
+    }
+    
+    // Handle mouse input for locking cursor into game mode
+    // Allow clicking whenever cursor is normal and ImGui doesn't capture the mouse
     if (glfwGetInputMode(window, GLFW_CURSOR) == GLFW_CURSOR_NORMAL && !ImGui::GetIO().WantCaptureMouse) {
         if (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS) {
             firstMouse = true;
-            // Only set cursor mode, don't force disable immediately on web
+            // Lock cursor to window for gameplay
             #ifdef __EMSCRIPTEN__
-                // On web, this will trigger a pointer lock request which requires user gesture
-                // The click itself provides the gesture
                 glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
             #else
                 glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
             #endif
-            paused = false;
         }
-    } else if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS) {
-        glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
-        paused = true;
     }
     
     // Handle fullscreen entry/exit - only on native platforms
@@ -425,18 +423,31 @@ void emscripten_main_loop_callback() {
                 glfwSetWindowMonitor(window, monitor, 0, 0, vm->width, vm->height, vm->refreshRate);
                 fullscreen = true;
             } else {
-                WINDOW_WIDTH = 800;
-                WINDOW_HEIGHT = 600;
                 glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
-                glfwSetWindowMonitor(window, nullptr, 0, 0, WINDOW_WIDTH, WINDOW_HEIGHT, 0);
+                glfwSetWindowMonitor(window, nullptr, 0, 0, 800, 600, 0);
                 fullscreen = false;
+                
+                // Get actual window size after resize
                 int w, h;
                 glfwGetWindowSize(window, &w, &h);
+                WINDOW_WIDTH = w;
+                WINDOW_HEIGHT = h;
+                
+                // Center window on monitor
                 GLFWmonitor *m = glfwGetPrimaryMonitor();
                 int mx, my, mw, mh;
                 glfwGetMonitorWorkarea(m, &mx, &my, &mw, &mh);
                 glfwSetWindowPos(window, mx + (mw - w) / 2, my + (mh - h) / 2);
+                
+                // Update viewport immediately
+                glViewport(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT);
+                
+                // Update camera aspect ratio
+                global_camera.aspect_ratio = static_cast<float>(WINDOW_WIDTH) / static_cast<float>(WINDOW_HEIGHT);
             }
+
+            // Update aspect ratio after changing viewport
+            global_camera.aspect_ratio = static_cast<float>(WINDOW_WIDTH) / static_cast<float>(WINDOW_HEIGHT);
         }
         if (glfwGetKey(window, GLFW_KEY_ENTER) == GLFW_RELEASE && glfwGetKey(window, GLFW_KEY_LEFT_ALT)) fullscreen_toggle = false;
     #endif
@@ -456,7 +467,6 @@ void emscripten_main_loop_callback() {
         ImGui::SetNextWindowPos(ImVec2(10, 10));
         ImGui::Begin("General");
         ImGui::Text("FPS: %.1f", fps);
-        ImGui::Text("Triangles: %u", total_triangles);
         
         #ifndef __EMSCRIPTEN__
             ImGui::Text("GPU Frame Time:");
@@ -464,6 +474,28 @@ void emscripten_main_loop_callback() {
             ImGui::Text("Skybox: %.3f ms", skyboxTime);
             ImGui::Text("Main: %.3f ms", mainTime);
             ImGui::Text("Total GPU: %.3f ms", shadowTime + skyboxTime + mainTime);
+
+            ImGui::Separator();
+
+            ImGui::Text("Settings: ");
+            ImGui::Text("Render detail level:");
+            ImGui::RadioButton("High", &renderer->renderDetailLevel, Renderer::HIGH);
+            ImGui::RadioButton("Medium", &renderer->renderDetailLevel, Renderer::MEDIUM);
+            ImGui::RadioButton("Low", &renderer->renderDetailLevel, Renderer::LOW);
+            ImGui::Checkbox("Enable Bloom", &renderer->bloomEnabled);
+            ImGui::SliderFloat("Bloom intensity", &renderer->bloomIntensity,
+                            0.0f, 2.0f, "%.2f");
+
+            ImGui::Checkbox("Enable Fog", &renderer->fogEnabled);
+            ImGui::ColorEdit3("Fog color", (float*)&renderer->fogColor);
+            ImGui::SliderFloat("Fog start", &renderer->fogStart,
+                            0.0f, 200.0f);
+            ImGui::SliderFloat("Fog end", &renderer->fogEnd,
+                            0.0f, 200.0f);
+            if (renderer->fogEnd <= renderer->fogStart) {
+                renderer->fogEnd = renderer->fogStart + 1.0f; // Ensure end is always greater than start
+            }
+            ImGui::Checkbox("Depth Prepass", &renderer->depthPrepassEnabled);
             if (ImGui::Button("V-Sync ON")) glfwSwapInterval(1);
             if (ImGui::Button("V-Sync OFF")) glfwSwapInterval(0);
         #else
@@ -496,7 +528,7 @@ void emscripten_main_loop_callback() {
 
         ImGui::End();
 
-        ImGui::SetNextWindowPos(ImVec2(WINDOW_WIDTH - 200, WINDOW_HEIGHT - 130));
+        ImGui::SetNextWindowPos(ImVec2(WINDOW_WIDTH - 200, WINDOW_HEIGHT - 110));
         ImGui::Begin("LOD Stats");
         ImGui::Text("LOD Stats:");
         int lod0_count = 0, lod1_count = 0, lod2_count = 0;
@@ -640,10 +672,6 @@ int main() {
     global_camera = create_camera(static_cast<float>(WINDOW_WIDTH) / static_cast<float>(WINDOW_HEIGHT));
     camera_update_vectors(&global_camera);
     
-    // Z buffer
-    glEnable(GL_DEPTH_TEST);
-    glDepthFunc(GL_LESS);
-    
     // OpenGL pixel functions
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
@@ -696,15 +724,19 @@ int main() {
     
     auto level_mesh = loadMesh("level/level.obj");
 
-    auto tree_mesh = loadMesh("realistic_tree/tree.obj");
-    auto tree_mesh_lod1 = loadMesh("realistic_tree/tree_lod1.obj");  // 50% triangles
-    auto tree_mesh_lod2 = loadMesh("realistic_tree/tree_lod2.obj");  // 25% triangles
+    auto tree_mesh = loadMesh("realistic_tree/tree.obj");            // LOD0: full detail 100% triangles
+    auto tree_mesh_lod1 = loadMesh("realistic_tree/tree_lod1.obj");  // LOD1: medium detail 50% triangles
+    auto tree_mesh_lod2 = loadMesh("realistic_tree/tree_lod2.obj");  // LOD2: low detail 25% triangles
     
     auto instructions_mesh = loadMesh("instructions_panel/quad.obj");    
     auto cube_mesh = loadMesh("cube/cube.obj");    
     auto sphere_mesh = loadMesh("sphere/sphere.obj");    
     auto cone_mesh = loadMesh("cone/cone.obj");
+
     auto statue_mesh = loadMesh("statue/statue_of_myself.obj");
+    auto statue_mesh_lod1 = loadMesh("statue/statue_of_myself_lod1.obj");
+    auto statue_mesh_lod2 = loadMesh("statue/statue_of_myself_lod2.obj");
+
     auto plastic_table = loadMesh("plastic_table/plastic_table.obj");
     // auto character_idle = loadMesh("characters3d.com - Idle.fbx");
     
@@ -716,12 +748,12 @@ int main() {
     
     // CREATE LIGHT SOURCES //
     
-    // createDirLight("sun", glm::vec3(1, -1, -1), glm::vec3(1, 1, 1), 10);
-    createPointLight("lamp", {{}}, glm::vec3(0, 20, 0), glm::vec3(1, 1, 1), 250,
-                    glm::vec3(1, 1, 1), std::vector<int>{CULL_BACK});
-    /* createSpotlight("spotlight", {{}}, glm::vec3(-20, 20, -20), glm::vec3(1, 1, 1), 1000,
-                    glm::vec3(1, -1, 1), 7.5f, 17.5f,
-                    glm::vec3(1, 1, 1), std::vector<int>{CULL_BACK}, false); */
+    createDirLight("sun", glm::vec3(-1, -1, 1), glm::vec3(1, 1, 1), 5);
+    createPointLight("orb", {{1000.0f, sphere_mesh}}, glm::vec3(0, 10, 0), glm::vec3(1, 1, 1), 100,
+                     glm::vec3(0.0f), glm::vec3(0.5, 0.5, 0.5), {CULL_BACK});
+    createSpotlight("spotlight", {{1000.0f, cone_mesh}}, glm::vec3(-10, 10, 10), glm::vec3(1, 1, 1), 1000,
+                    glm::vec3(1, -1, -1), glm::vec3(0.0f, 180.0f, 0.0f), 7.5f, 17.5f,
+                    glm::vec3(1.0f, 1.0f, 1.0f), {CULL_BACK});
 
     // Initialise shadow map
     initShadowMap();
@@ -729,40 +761,52 @@ int main() {
 
     // CREATE ENTITIES //
     
-    createEntity("level", {{1000.0f, level_mesh}}, glm::vec3(0, 0, 0), glm::vec3(0, 0, 0), glm::vec3(100, 100, 100), std::vector<int> {CULL_NONE});
-    for (int i = 0; i < 10; i++) {
-        for (int j = 0; j < 10; j++) {
+    createEntity("level", {{1000.0f, level_mesh}}, glm::vec3(0, 0, 0), glm::vec3(0, 0, 0), glm::vec3(100, 100, 100), {CULL_NONE});
+    for (int i = 0; i < 5; i++) {
+        for (int j = 0; j < 5; j++) {
             createEntity("tree",
             {
-                {25.0f, tree_mesh},       // LOD0: full detail
-                {50.0f, tree_mesh_lod1},  // LOD1: medium detail
-                {75.0f, tree_mesh_lod2}   // LOD2: low detail
+                {25.0f, tree_mesh},
+                {50.0f, tree_mesh_lod1},
+                {75.0f, tree_mesh_lod2}
             },
-            glm::vec3(i * 5, 0, -j * 5),
+            glm::vec3(i * 5, 0, -j * 5 - 10),
             glm::vec3(0, 0, 0),
             glm::vec3(1, 1, 1),
             {CULL_BACK, CULL_NONE});
         }
     }
-    /* createEntity("instructions", instructions_mesh, glm::vec3(0, 2, 4), glm::vec3(0, 0, 0), glm::vec3(1, 1, 1), std::vector<int> {CULL_NONE});
-    createEntity("cube", cube_mesh, glm::vec3(5, 3, 0), glm::vec3(0, 0, 0), glm::vec3(1, 1, 1), std::vector<int> {CULL_BACK});
-    createEntity("sphere", sphere_mesh, glm::vec3(0, 2, -5), glm::vec3(0, 0, 0), glm::vec3(1, 1, 1), std::vector<int> {CULL_BACK});
-    createEntity("cone", cone_mesh, glm::vec3(50, 3, 0), glm::vec3(45, 135, 315), glm::vec3(1, 1, 1), std::vector<int>{CULL_BACK});
-    createEntity("statue", statue_mesh, glm::vec3(-5, 1.9, -4), glm::vec3(0, 0, 0), glm::vec3(0.1, 0.1, 0.1), std::vector<int>{CULL_BACK});
-    createEntity("plastic_table", plastic_table, glm::vec3(-5, 0, -4), glm::vec3(0, 0, 0), glm::vec3(0.5, 0.5, 0.5), std::vector<int>{CULL_BACK}); */
-    // createEntity("character_idle", character_idle, glm::vec3(5, 0, 5), glm::vec3(0, 0, 0), glm::vec3(0.1, 0.1, 0.1), std::vector<int>{CULL_BACK});
+    createEntity("instructions", {{1000.0f, instructions_mesh}}, glm::vec3(0, 2, 4), glm::vec3(0, 0, 0), glm::vec3(1, 1, 1), {CULL_NONE});
+    createEntity("cube", {{1000.0f, cube_mesh}}, glm::vec3(5, 3, 0), glm::vec3(0, 0, 0), glm::vec3(1, 1, 1), {CULL_BACK});
+    createEntity("sphere", {{1000.0f, sphere_mesh}}, glm::vec3(0, 2, -5), glm::vec3(0, 0, 0), glm::vec3(1, 1, 1), {CULL_BACK});
+    createEntity("statue",
+    {
+        {25.0f, statue_mesh},
+        {50.0f, statue_mesh_lod1},
+        {75.0f, statue_mesh_lod2}
+    },
+    glm::vec3(-5, 1.9, -4),
+    glm::vec3(0, 0, 0),
+    glm::vec3(0.1, 0.1, 0.1),
+    {CULL_BACK});
+    createEntity("plastic_table", {{1000.0f, plastic_table}}, glm::vec3(-5, 0, -4), glm::vec3(0, 0, 0), glm::vec3(0.5, 0.5, 0.5), {CULL_BACK});
+    // createEntity("character_idle", {{1000.0f, character_idle}}, glm::vec3(5, 0, 5), glm::vec3(0, 0, 0), glm::vec3(0.1, 0.1, 0.1), {CULL_BACK});
 
-    printf("Total triangles: %d\n", total_triangles);
     printf("Active entities: %zu\n", entity_manager.size());
     
     // Mark initialization as complete
     initialization_complete = true;
     printf("Initialization complete! Engine ready.\n");
     
+    // Reset viewport and framebuffer state (needed to fix slanted scene on startup)
+    int fb_width, fb_height;
+    glfwGetFramebufferSize(window, &fb_width, &fb_height);
+    glViewport(0, 0, fb_width, fb_height);
+    
     // ============================================================================
     // SETUP MAIN LOOP (both native and Emscripten)
     // ============================================================================
-    
+
     // Create app context (used by both native and web)
     #ifdef __EMSCRIPTEN__
         g_app_context = new AppContext();
@@ -851,11 +895,12 @@ void mouse_callback(GLFWwindow* window, double xpos, double ypos) {
 }
 
 void framebuffer_size_callback(GLFWwindow* window, int width, int height) {
+    // Ignore resize callbacks during initialization - the system may auto-resize
+    if (!initialization_complete) {
+        return;
+    }
     WINDOW_WIDTH = width;
     WINDOW_HEIGHT = height;
     (void)window;
     glViewport(0, 0, width, height);
-    if (height > 0) {
-        global_camera.aspect_ratio = static_cast<float>(width) / static_cast<float>(height);
-    }
 }

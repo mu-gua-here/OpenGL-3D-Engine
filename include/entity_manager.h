@@ -77,10 +77,8 @@ void createEntity(std::string name, const std::vector<std::pair<float, std::vect
 // Template implementation must be in header
 template <typename Pred>
 void EntityManager::removeEntities(Pred&& pred) {
-    extern unsigned int total_triangles;
     for (Entity& entity : entities) {
         if (entity.active && pred(entity)) {
-            for (const auto& mesh : entity.meshes) total_triangles -= mesh->TRIANGLE_COUNT;
             entity.meshes.clear();
             entity.active = false;
         }

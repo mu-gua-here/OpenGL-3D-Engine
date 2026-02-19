@@ -4,6 +4,7 @@
 #include "entity_manager.h"
 #include "mesh.h"
 #include "light.h"
+#include "bloom.h"
 #include "shader_loading.h"
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
@@ -11,6 +12,7 @@
 #include <cstdio>
 #include <unordered_map>
 #include <algorithm>
+#include <GLFW/glfw3.h>
 
 // Extern declarations
 extern glm::mat4 view;
@@ -23,6 +25,8 @@ extern unsigned int SHADOW_HEIGHT;
 extern GLuint default_texture_id;
 extern Camera global_camera;
 extern std::vector<Light> lights;
+extern int WINDOW_WIDTH;
+extern int WINDOW_HEIGHT;
 
 std::string buildAssetPath(const std::string& relative_path);
 
@@ -92,6 +96,54 @@ Renderer::Renderer() {
         depth_prepass_shader =  std::make_unique<Shader>(prepass_vert, prepass_frag);
         printf("Shaders created successfully. Main: %u, Shadow: %u, Unlit: %u, Prepass: %u\n",
                pbr_shader->getProgram(), shadow_shader->getProgram(), unlit_shader->getProgram(), depth_prepass_shader->getProgram());
+        
+        // Load bloom shaders for screen-space post-processing
+        std::string bright_vert = loadShaderFile(buildAssetPath("res/shaders/bloom_bright.vs"));
+        std::string bright_frag = loadShaderFile(buildAssetPath("res/shaders/bloom_bright.fs"));
+        std::string blur_h_vert = loadShaderFile(buildAssetPath("res/shaders/bloom_blur_h.vs"));
+        std::string blur_h_frag = loadShaderFile(buildAssetPath("res/shaders/bloom_blur_h.fs"));
+        std::string blur_v_vert = loadShaderFile(buildAssetPath("res/shaders/bloom_blur_v.vs"));
+        std::string blur_v_frag = loadShaderFile(buildAssetPath("res/shaders/bloom_blur_v.fs"));
+        std::string composite_vert = loadShaderFile(buildAssetPath("res/shaders/bloom_composite.vs"));
+        std::string composite_frag = loadShaderFile(buildAssetPath("res/shaders/bloom_composite.fs"));
+        
+        bloom_bright_shader = std::make_unique<Shader>(bright_vert, bright_frag);
+        bloom_blur_h_shader = std::make_unique<Shader>(blur_h_vert, blur_h_frag);
+        bloom_blur_v_shader = std::make_unique<Shader>(blur_v_vert, blur_v_frag);
+        bloom_composite_shader = std::make_unique<Shader>(composite_vert, composite_frag);
+        printf("Bloom shaders loaded successfully. Bright: %u, BlurH: %u, BlurV: %u, Composite: %u\n",
+               bloom_bright_shader->getProgram(), bloom_blur_h_shader->getProgram(), 
+               bloom_blur_v_shader->getProgram(), bloom_composite_shader->getProgram());
+        
+        // Create screen quad for bloom post-processing
+        float quadVertices[] = {
+            -1.0f,  1.0f,  0.0f, 1.0f,
+            -1.0f, -1.0f,  0.0f, 0.0f,
+             1.0f,  1.0f,  1.0f, 1.0f,
+             1.0f, -1.0f,  1.0f, 0.0f,
+        };
+        
+        glGenVertexArrays(1, &screenQuadVAO);
+        glGenBuffers(1, &screenQuadVBO);
+        
+        glBindVertexArray(screenQuadVAO);
+        glBindBuffer(GL_ARRAY_BUFFER, screenQuadVBO);
+        glBufferData(GL_ARRAY_BUFFER, sizeof(quadVertices), quadVertices, GL_STATIC_DRAW);
+        
+        glEnableVertexAttribArray(0);
+        glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)0);
+        
+        glEnableVertexAttribArray(1);
+        glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)(2 * sizeof(float)));
+        
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
+        glBindVertexArray(0);
+        // 
+        // glBindVertexArray(0);
+        // 
+        // // Initialize post-process framebuffer
+        // updateFramebufferSize(WINDOW_WIDTH, WINDOW_HEIGHT);
+        
     } catch (const std::exception& e) {
         printf("Failed to create shaders: %s\n", e.what());
         throw;
@@ -192,6 +244,11 @@ void Renderer::renderDepthPrepass() {
         glDrawElementsInstanced(GL_TRIANGLES, mesh->INDEX_COUNT, GL_UNSIGNED_INT, 0, matrices.size());
     }
     glBindVertexArray(0);
+    
+    // CRITICAL: Restore color writes and depth test for main rendering pass
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+    glDepthFunc(GL_EQUAL);  // Use EQUAL since we have full depth buffer from prepass
+    glDepthMask(GL_FALSE);  // Don't write depth again in main pass
 }
 
 void Renderer::renderShadowPass(EntityManager& entity_manager, const Light& light) {
@@ -236,15 +293,19 @@ void Renderer::renderShadowPass(EntityManager& entity_manager, const Light& ligh
         for (const auto& v : corners) radius = std::max(radius, glm::length(v - center));
         radius = std::ceil(radius * 16.0f) / 16.0f;
 
-        lightView = glm::lookAt(center - finalDir * radius, center, up);
-        lightProjection = glm::ortho(-radius, radius, -radius, radius, -radius * 5.0f, radius * 5.0f);
+        // Light positioned to capture edge shadows
+        lightView = glm::lookAt(center - finalDir * radius * 1.5f, center, up);
+        
+        float projRadius = radius;
+        float farPlane = radius * 10.0f;
+        lightProjection = glm::ortho(-projRadius, projRadius, -projRadius, projRadius, -radius * 0.5f, farPlane);
 
         glm::mat4 tempShadowMatrix = lightProjection * lightView;
         glm::vec4 shadowOrigin = tempShadowMatrix * glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
-        shadowOrigin = shadowOrigin * (float)SHADOW_WIDTH / 2.0f;
+        shadowOrigin *= (float)SHADOW_WIDTH / 2.0f;
         glm::vec4 roundedOrigin = glm::round(shadowOrigin);
         glm::vec4 roundOffset = roundedOrigin - shadowOrigin;
-        roundOffset = roundOffset * 2.0f / (float)SHADOW_WIDTH;
+        roundOffset *= 2.0f / (float)SHADOW_WIDTH;
         roundOffset.z = 0.0f; roundOffset.w = 0.0f;
         lightProjection[3] += roundOffset;
     }
@@ -253,8 +314,8 @@ void Renderer::renderShadowPass(EntityManager& entity_manager, const Light& ligh
     shadow_shader->use();
     shadow_shader->setMat4("lightSpaceMatrix", lightSpaceMatrix);
 
-    Frustum frustum;
-    frustum.extractFromMatrix(projection * view);
+    // Note: Don't frustum cull for shadows - objects outside camera view can cast visible shadows
+    // These cutoff values are used only for maximum distance culling, not visibility testing
 
     // Batch shadow rendering by mesh
     std::unordered_map<Mesh*, std::vector<glm::mat4>> shadowBatches;
@@ -273,12 +334,16 @@ void Renderer::renderShadowPass(EntityManager& entity_manager, const Light& ligh
         if (is_light_entity) continue;
 
         float radius = glm::length(entity->scale) * 5.0f;
-        if (!frustum.sphereInFrustum(entity->position, radius)) {
-            continue;  // Skip shadow rendering for this entity
-        }
+        // Don't frustum cull for shadows - objects outside camera view can cast visible shadows
+        // Only do distance-based culling for performance
+        float distance = glm::length(global_camera.position - entity->position);
+        if (distance > 200.0f) continue;  // Skip very distant objects
 
         glm::mat4 model = entity->getModelMatrix(entity);
-        for (const auto& mesh : entity->meshes) {
+        
+        // Use LOD-selected meshes for shadow pass
+        const auto& meshesToUse = entity->getMeshesForDistance(distance);
+        for (const auto& mesh : meshesToUse) {
             if (mesh && mesh->isValid()) {
                 shadowBatches[mesh.get()].push_back(model);
             }
@@ -306,7 +371,9 @@ void Renderer::renderShadowPass(EntityManager& entity_manager, const Light& ligh
         // Only bind texture if different
         GLuint texture_to_use = mesh->material.hasAlbedoMap() ? mesh->material.albedo_map : default_texture_id;
         if (texture_to_use != lastTexture) {
+            glActiveTexture(GL_TEXTURE0);
             glBindTexture(GL_TEXTURE_2D, texture_to_use);
+            shadow_shader->setInt("u_texture", 0);
             lastTexture = texture_to_use;
         }
 
@@ -321,36 +388,6 @@ void Renderer::renderShadowPass(EntityManager& entity_manager, const Light& ligh
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
     glViewport(viewport[0], viewport[1], viewport[2], viewport[3]);
     glCullFace(GL_BACK);
-}
-
-void Renderer::setGlobalUniforms(const Camera& camera, int shadowLightIndex) {
-    std::vector<glm::vec3> positions, colors, directions;
-    std::vector<float> intensities, inner_cutoffs, outer_cutoffs, types;
-
-    for (const auto& light : lights) {
-        positions.push_back(light.position);
-        colors.push_back(light.color);
-        intensities.push_back(light.intensity);
-        directions.push_back(light.direction);
-        inner_cutoffs.push_back(light.inner_cutoff_cos);
-        outer_cutoffs.push_back(light.outer_cutoff_cos);
-        types.push_back((float)light.type);
-    }
-
-    pbr_shader->use();
-    pbr_shader->setInt("lightCount", (int)lights.size());
-    pbr_shader->setVec3Array("lightPositions", positions);
-    pbr_shader->setVec3Array("lightColors", colors);
-    pbr_shader->setFloatArray("lightIntensities", intensities);
-    pbr_shader->setVec3Array("lightDirections", directions);
-    pbr_shader->setFloatArray("lightInnerCutoffs", inner_cutoffs);
-    pbr_shader->setFloatArray("lightOuterCutoffs", outer_cutoffs);
-    pbr_shader->setFloatArray("lightTypes", types);
-    pbr_shader->setMat4("view", view);
-    pbr_shader->setMat4("projection", projection);
-    pbr_shader->setMat4("lightSpaceMatrix", lightSpaceMatrix);
-    pbr_shader->setVec3("viewPos", camera.position);
-    pbr_shader->setInt("shadowLightIndex", shadowLightIndex);
 }
 
 void Renderer::bindMaterial(const Material* material) {
@@ -389,12 +426,119 @@ void Renderer::bindMaterial(const Material* material) {
     pbr_shader->setFloat("heightScale", material->height_scale);
 }
 
-void Renderer::renderScene(EntityManager& entity_manager) {
+void Renderer::renderInstancedMesh(Mesh* mesh, const std::vector<glm::mat4>& matrices) {
+    if (matrices.empty() || matrices.size() > mesh->maxInstances) return;
+    
+    // Upload instance matrices
+    glBindBuffer(GL_ARRAY_BUFFER, mesh->instanceVBO);
+    glBufferSubData(GL_ARRAY_BUFFER, 0, 
+                    matrices.size() * sizeof(glm::mat4), 
+                    matrices.data());
+    
+    // Draw instanced
+    glBindVertexArray(mesh->VAO);
+    glDrawElementsInstanced(GL_TRIANGLES, mesh->INDEX_COUNT, 
+                           GL_UNSIGNED_INT, 0, matrices.size());
+    glBindVertexArray(0);
+}
+
+void Renderer::renderMesh(Mesh* mesh, const glm::mat4& model) {
+    if (mesh->TRIANGLE_COUNT == 0 || !mesh->isValid()) return;
+
+    // Handle culling
+    switch (mesh->cull_mode) {
+        case CULL_NONE: glDisable(GL_CULL_FACE); break;
+        case CULL_BACK: glEnable(GL_CULL_FACE); glCullFace(GL_BACK); break;
+        case CULL_FRONT: glEnable(GL_CULL_FACE); glCullFace(GL_FRONT); break;
+    }
+
+    // Calculate matrices
+    glm::mat3 normalMatrix = glm::transpose(glm::inverse(glm::mat3(model)));
+
+    // Set mesh-specific uniforms ONLY
+    pbr_shader->setMat4("model", model);
+    pbr_shader->setMat3("normalMatrix", normalMatrix);
+
+    // Draw
+    glBindVertexArray(mesh->VAO);
+    glDrawElements(GL_TRIANGLES, mesh->INDEX_COUNT, GL_UNSIGNED_INT, 0);
+    glBindVertexArray(0);
+}
+
+void Renderer::renderUnlitMesh(Mesh* mesh, const std::vector<glm::mat4>& matrices, const glm::vec3& color, int intensity) {
+    if (matrices.empty() || mesh->TRIANGLE_COUNT == 0 || !mesh->isValid()) return;
+    if (matrices.size() > mesh->maxInstances) return;
+    
+    unlit_shader->use();
+    unlit_shader->setVec3("emissiveColor", color);
+    unlit_shader->setFloat("emissiveIntensity", intensity);
+    unlit_shader->setMat4("view", view);
+    unlit_shader->setMat4("projection", projection);
+    
+    // Upload instance matrices
+    glBindBuffer(GL_ARRAY_BUFFER, mesh->instanceVBO);
+    glBufferSubData(GL_ARRAY_BUFFER, 0, matrices.size() * sizeof(glm::mat4), matrices.data());
+    
+    // Draw instanced
+    glBindVertexArray(mesh->VAO);
+    glDrawElementsInstanced(GL_TRIANGLES, mesh->INDEX_COUNT, GL_UNSIGNED_INT, 0, matrices.size());
+    glBindVertexArray(0);
+}
+
+void Renderer::renderPBRMeshes(const Camera& camera, int shadowLightIndex, EntityManager& entity_manager) {
+    // Set normal shader uniforms
+    std::vector<glm::vec3> positions, colors, directions;
+    std::vector<float> intensities, inner_cutoffs, outer_cutoffs, types;
+
+    for (const auto& light : lights) {
+        positions.push_back(light.position);
+        colors.push_back(light.color);
+        intensities.push_back(light.intensity);
+        directions.push_back(light.direction);
+        inner_cutoffs.push_back(light.inner_cutoff_cos);
+        outer_cutoffs.push_back(light.outer_cutoff_cos);
+        types.push_back((float)light.type);
+    }
+
+    pbr_shader->use();
+    pbr_shader->setInt("lightCount", (int)lights.size());
+    pbr_shader->setVec3Array("lightPositions", positions);
+    pbr_shader->setVec3Array("lightColors", colors);
+    pbr_shader->setFloatArray("lightIntensities", intensities);
+    pbr_shader->setVec3Array("lightDirections", directions);
+    pbr_shader->setFloatArray("lightInnerCutoffs", inner_cutoffs);
+    pbr_shader->setFloatArray("lightOuterCutoffs", outer_cutoffs);
+    pbr_shader->setFloatArray("lightTypes", types);
+    pbr_shader->setMat4("view", view);
+    pbr_shader->setMat4("projection", projection);
+    pbr_shader->setMat4("lightSpaceMatrix", lightSpaceMatrix);
+    pbr_shader->setVec3("viewPos", camera.position);
+    pbr_shader->setInt("shadowLightIndex", shadowLightIndex);
+    
+    // Fog parameters
+    pbr_shader->setBool("enableFog", fogEnabled);
+    pbr_shader->setVec3("fogColor", fogColor);
+    pbr_shader->setFloat("fogStart", fogStart);
+    pbr_shader->setFloat("fogEnd", fogEnd);
+    
+    // Ambient lighting
+    pbr_shader->setVec3("ambientColor", glm::vec3(0.8f, 0.85f, 0.9f));  // Neutral blue-ish ambient
+    pbr_shader->setFloat("ambientIntensity", 0.4f);  // 40% ambient intensity
+
+    // Render detail level
+    pbr_shader->setInt("renderDetailLevel", renderDetailLevel);
+
     stats.reset();  // Reset at start of frame
     
     glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-    glDepthFunc(GL_EQUAL);
-    glDepthMask(GL_FALSE);
+
+    if (depthPrepassEnabled) {
+        glDepthFunc(GL_EQUAL);
+        glDepthMask(GL_FALSE);
+    } else {
+        glDepthFunc(GL_LESS);
+        glDepthMask(GL_TRUE);
+    }
 
     Frustum frustum;
     frustum.extractFromMatrix(projection * view);
@@ -429,7 +573,7 @@ void Renderer::renderScene(EntityManager& entity_manager) {
         
         // Calculate distance for LOD selection
         float distance = glm::length(global_camera.position - entity->position);
-        const auto& meshesToUse = entity->getMeshesForDistance(distance);  // USE LOD HERE!
+        const auto& meshesToUse = entity->getMeshesForDistance(distance);  // USE LOD HERE
         
         for (auto& meshPtr : meshesToUse) {  // Use LOD meshes
             if (meshPtr && meshPtr->isValid()) {
@@ -490,74 +634,197 @@ void Renderer::renderScene(EntityManager& entity_manager) {
     for (auto& item : transparentObjects) {
         bindMaterial(&item.second.first->material);
         stats.materialChanges++;
-        drawMesh(item.second.first, item.second.second);
+        renderMesh(item.second.first, item.second.second);
         stats.drawCalls++;
         stats.trianglesRendered += item.second.first->TRIANGLE_COUNT;
     }
 
     glDisable(GL_BLEND);
     glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+    
+    // Restore proper depth state after transparent objects
+    glDepthFunc(GL_LESS);
+    glDepthMask(GL_TRUE);
+    glEnable(GL_DEPTH_TEST);
 }
 
-void Renderer::renderInstancedMesh(Mesh* mesh, const std::vector<glm::mat4>& matrices) {
-    if (matrices.empty() || matrices.size() > mesh->maxInstances) return;
+void Renderer::renderUnlitMeshes(EntityManager& entity_manager) {
+    // Save current GL state
+    GLboolean cullFaceEnabled = glIsEnabled(GL_CULL_FACE);
+    GLint depthFunc;
+    glGetIntegerv(GL_DEPTH_FUNC, &depthFunc);
+    GLboolean depthWriteMask;
+    glGetBooleanv(GL_DEPTH_WRITEMASK, &depthWriteMask);
     
-    // Upload instance matrices
-    glBindBuffer(GL_ARRAY_BUFFER, mesh->instanceVBO);
-    glBufferSubData(GL_ARRAY_BUFFER, 0, 
-                    matrices.size() * sizeof(glm::mat4), 
-                    matrices.data());
-    
-    // Draw instanced
-    glBindVertexArray(mesh->VAO);
-    glDrawElementsInstanced(GL_TRIANGLES, mesh->INDEX_COUNT, 
-                           GL_UNSIGNED_INT, 0, matrices.size());
-    glBindVertexArray(0);
-}
-
-void Renderer::drawMesh(Mesh* mesh, const glm::mat4& model) {
-    if (mesh->TRIANGLE_COUNT == 0 || !mesh->isValid()) return;
-
-    // Handle culling
-    switch (mesh->cull_mode) {
-        case CULL_NONE: glDisable(GL_CULL_FACE); break;
-        case CULL_BACK: glEnable(GL_CULL_FACE); glCullFace(GL_BACK); break;
-        case CULL_FRONT: glEnable(GL_CULL_FACE); glCullFace(GL_FRONT); break;
-    }
-
-    // Calculate matrices
-    glm::mat3 normalMatrix = glm::transpose(glm::inverse(glm::mat3(model)));
-
-    // Set mesh-specific uniforms ONLY
-    pbr_shader->setMat4("model", model);
-    pbr_shader->setMat3("normalMatrix", normalMatrix);
-
-    // Draw
-    glBindVertexArray(mesh->VAO);
-    glDrawElements(GL_TRIANGLES, mesh->INDEX_COUNT, GL_UNSIGNED_INT, 0);
-    glBindVertexArray(0);
-}
-
-void Renderer::drawUnlitMesh(Entity* entity, Mesh* mesh, const glm::vec3& color, int intensity) {
-    if (!entity->active || mesh->TRIANGLE_COUNT == 0 || !mesh->isValid()) return;
-    
+    // Set up state for unlit rendering
     glDisable(GL_CULL_FACE);
+    glEnable(GL_DEPTH_TEST);
+    glDepthMask(GL_TRUE);
+    
     unlit_shader->use();
-    
-    glm::mat4 model = glm::translate(glm::mat4(1.0f), entity->position) *
-                      glm::rotate(glm::mat4(1.0f), glm::radians(entity->rotation.z), glm::vec3(0, 0, 1)) *
-                      glm::rotate(glm::mat4(1.0f), glm::radians(entity->rotation.y), glm::vec3(0, 1, 0)) *
-                      glm::rotate(glm::mat4(1.0f), glm::radians(entity->rotation.x), glm::vec3(1, 0, 0)) *
-                      glm::scale(glm::mat4(1.0f), entity->scale);
-    
-    unlit_shader->setMat4("model", model);
     unlit_shader->setMat4("view", view);
     unlit_shader->setMat4("projection", projection);
-    unlit_shader->setVec3("emissiveColor", color);
-    unlit_shader->setFloat("emissiveIntensity", intensity);
     
-    glBindVertexArray(mesh->VAO);
-    glDrawElements(GL_TRIANGLES, mesh->INDEX_COUNT, GL_UNSIGNED_INT, 0);
-    glBindVertexArray(0);
-    glEnable(GL_CULL_FACE);
+    // Batch unlit meshes by light entity
+    std::unordered_map<Mesh*, std::vector<glm::mat4>> unlitBatches;
+    std::unordered_map<Mesh*, std::pair<glm::vec3, int>> unlitMeshInfo;  // mesh -> (color, intensity)
+        
+    for (size_t i = 0; i < entity_manager.size(); i++) {
+        Entity* entity = entity_manager.getEntityAt(i);
+        if (!entity || !entity->active) continue;
+
+        for (const auto& light : lights) {
+            if (entity->name == light.entity_name) {
+                // Use LOD-selected meshes for light rendering
+                float distance = glm::length(global_camera.position - entity->position);
+                const auto& meshesToUse = entity->getMeshesForDistance(distance);
+                for (const auto& meshPtr : meshesToUse) {
+                    if (meshPtr && meshPtr->isValid()) {
+                        glm::mat4 model = glm::translate(glm::mat4(1.0f), entity->position) *
+                                          glm::rotate(glm::mat4(1.0f), glm::radians(entity->rotation.z), glm::vec3(0, 0, 1)) *
+                                          glm::rotate(glm::mat4(1.0f), glm::radians(entity->rotation.y), glm::vec3(0, 1, 0)) *
+                                          glm::rotate(glm::mat4(1.0f), glm::radians(entity->rotation.x), glm::vec3(1, 0, 0)) *
+                                          glm::scale(glm::mat4(1.0f), entity->scale);
+                        
+                        unlitBatches[meshPtr.get()].push_back(model);
+                        unlitMeshInfo[meshPtr.get()] = {light.color, light.intensity};
+                    }
+                }
+                break; 
+            }
+        }
+    }
+
+    // Render batches
+    for (auto& [mesh, matrices] : unlitBatches) {
+        if (matrices.empty()) continue;
+
+        auto [color, intensity] = unlitMeshInfo[mesh];
+        unlit_shader->setVec3("emissiveColor", color);
+        unlit_shader->setFloat("emissiveIntensity", intensity);
+        
+        renderUnlitMesh(mesh, matrices, color, intensity);
+    }
+    
+    // Restore GL state
+    if (cullFaceEnabled) glEnable(GL_CULL_FACE);
+    else glDisable(GL_CULL_FACE);
+    glDepthFunc(depthFunc);
+    if (depthWriteMask) glDepthMask(GL_TRUE);
+    else glDepthMask(GL_FALSE);
+}
+
+// Screen-space post-process bloom
+void Renderer::applyBloomPostProcess(int screenWidth, int screenHeight) {
+    static bool firstCall = true;
+    if (firstCall) {
+        printf("Bloom post-process starting. Screen: %dx%d\n", screenWidth, screenHeight);
+        firstCall = false;
+    }
+    
+    // Initialize textures on first call or screen resize
+    if (lastScreenWidth != screenWidth || lastScreenHeight != screenHeight) {
+        printf("Initializing bloom textures: %dx%d\n", screenWidth, screenHeight);
+        lastScreenWidth = screenWidth;
+        lastScreenHeight = screenHeight;
+        
+        // Delete old textures
+        if (screenColorTexture) glDeleteTextures(1, &screenColorTexture);
+        if (bloomBrightTexture) glDeleteTextures(1, &bloomBrightTexture);
+        if (bloomBlurH) glDeleteTextures(1, &bloomBlurH);
+        if (bloomBlurV) glDeleteTextures(1, &bloomBlurV);
+        if (bloomFBO) glDeleteFramebuffers(1, &bloomFBO);
+        
+        // Create color texture from screen
+        glGenTextures(1, &screenColorTexture);
+        glBindTexture(GL_TEXTURE_2D, screenColorTexture);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB16F, screenWidth, screenHeight, 0, GL_RGB, GL_FLOAT, nullptr);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        
+        // Create bloom bright texture
+        glGenTextures(1, &bloomBrightTexture);
+        glBindTexture(GL_TEXTURE_2D, bloomBrightTexture);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB16F, screenWidth / 2, screenHeight / 2, 0, GL_RGB, GL_FLOAT, nullptr);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        
+        // Create blur textures
+        glGenTextures(1, &bloomBlurH);
+        glBindTexture(GL_TEXTURE_2D, bloomBlurH);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB16F, screenWidth / 2, screenHeight / 2, 0, GL_RGB, GL_FLOAT, nullptr);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        
+        glGenTextures(1, &bloomBlurV);
+        glBindTexture(GL_TEXTURE_2D, bloomBlurV);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB16F, screenWidth / 2, screenHeight / 2, 0, GL_RGB, GL_FLOAT, nullptr);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        
+        // Create bloom FBO
+        glGenFramebuffers(1, &bloomFBO);
+    }
+    
+    glDisable(GL_DEPTH_TEST);
+    
+    // Copy screen to texture
+    glBindTexture(GL_TEXTURE_2D, screenColorTexture);
+    glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0, screenWidth, screenHeight);
+    
+    // Bright pass - extract pixels above threshold
+    glBindFramebuffer(GL_FRAMEBUFFER, bloomFBO);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, bloomBrightTexture, 0);
+    glViewport(0, 0, screenWidth / 2, screenHeight / 2);
+    
+    bloom_bright_shader->use();
+    bloom_bright_shader->setFloat("threshold", bloomThreshold);
+    
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, screenColorTexture);
+    glBindVertexArray(screenQuadVAO);
+    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+    
+    // Horizontal blur
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, bloomBlurH, 0);
+    bloom_blur_h_shader->use();
+    
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, bloomBrightTexture);
+    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+    
+    // Vertical blur
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, bloomBlurV, 0);
+    bloom_blur_v_shader->use();
+    
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, bloomBlurH);
+    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+    
+    // Composite bloom back to screen with additive blending
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);  // Back to screen
+    glViewport(0, 0, screenWidth, screenHeight);
+    glBlendFunc(GL_ONE, GL_ONE);  // Additive blending for bloom
+    
+    bloom_composite_shader->use();
+    bloom_composite_shader->setInt("sceneTexture", 0);
+    bloom_composite_shader->setInt("bloomTexture", 1);
+    bloom_composite_shader->setFloat("bloomIntensity", bloomIntensity);
+    
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, screenColorTexture);
+    glActiveTexture(GL_TEXTURE1);
+    glBindTexture(GL_TEXTURE_2D, bloomBlurV);
+    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+    
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);  // Reset blending
+    glEnable(GL_DEPTH_TEST);
 }

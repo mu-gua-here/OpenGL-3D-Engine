@@ -67,6 +67,7 @@ add_executable(${PROJECT_NAME}
     src/entity_manager.cpp
     src/renderer.cpp
     src/shadowmap.cpp
+    src/bloom.cpp
     lib/glad/src/glad.c
     lib/imgui/imgui.cpp
     lib/imgui/imgui_demo.cpp

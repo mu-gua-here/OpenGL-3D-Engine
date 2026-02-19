@@ -6,22 +6,7 @@
 // Global entity manager instance
 EntityManager entity_manager;
 
-// Global triangle counter
-extern unsigned int total_triangles;
-
 size_t EntityManager::addEntity(Entity&& entity) {
-    // Count triangles for this entity
-    extern unsigned int total_triangles;
-    
-    unsigned int entity_triangles = 0;
-    for (const auto& mesh : entity.meshes) {
-        if (mesh) {
-            entity_triangles += mesh->TRIANGLE_COUNT;
-        }
-    }
-    
-    total_triangles += entity_triangles;
-        
     entities.push_back(std::move(entity));
     return entities.size() - 1;
 }
@@ -98,33 +83,13 @@ void createEntity(std::string name, const std::vector<std::pair<float, std::vect
     entity.scale = scale;
     entity.active = 1;
     
-    extern unsigned int total_triangles;
     unsigned int total_mesh_triangles = 0;
     
     // Create LOD levels from the specs
-    // Store materials from the first LOD to apply to corresponding meshes in other LODs
-    std::vector<Material> baseMaterials;
     for (const auto& [maxDistance, meshes] : lodSpecs) {
         Entity::LODLevel level;
         level.maxDistance = maxDistance;
         level.meshes = meshes;
-        
-        // Save materials from first LOD, then apply them to all subsequent LODs
-        if (entity.lod_levels.empty()) {
-            // First LOD: save each mesh's material
-            for (const auto& mesh : meshes) {
-                if (mesh) {
-                    baseMaterials.push_back(mesh->material);
-                }
-            }
-        } else {
-            // Subsequent LODs: apply corresponding LOD0 material to each mesh
-            for (size_t i = 0; i < level.meshes.size(); ++i) {
-                if (level.meshes[i] && i < baseMaterials.size()) {
-                    level.meshes[i]->material = baseMaterials[i];
-                }
-            }
-        }
         
         // Apply cull modes
         for (size_t i = 0; i < level.meshes.size(); ++i) {
@@ -148,9 +113,7 @@ void createEntity(std::string name, const std::vector<std::pair<float, std::vect
         
         entity.lod_levels.push_back(level);
     }
-    
-    total_triangles += total_mesh_triangles;
-    
+        
     printf("Created entity '%s' with %zu LOD levels (%u triangles)\n",
            name.c_str(), lodSpecs.size(), total_mesh_triangles);
     

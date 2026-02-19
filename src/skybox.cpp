@@ -58,6 +58,10 @@ void Skybox::render(Camera* camera) {
     skybox_shader->setMat4("view", skybox_view);
     skybox_shader->setMat4("projection", skybox_projection);
     
+    // Apply fog to skybox to hide it in distance
+    skybox_shader->setInt("enableFog", 1);
+    skybox_shader->setVec3("fogColor", glm::vec3(0.5f, 0.65f, 0.75f));
+    
     glBindVertexArray(VAO);
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_CUBE_MAP, cubemap_texture[0]);

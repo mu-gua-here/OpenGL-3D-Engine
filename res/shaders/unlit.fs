@@ -4,5 +4,6 @@ uniform vec3 emissiveColor;
 uniform float emissiveIntensity;
 
 void main() {
-    FragColor = vec4(emissiveColor * emissiveIntensity, 1.0);
+    vec3 finalColor = emissiveColor * emissiveIntensity;
+    FragColor = vec4(finalColor, 1.0);
 }
