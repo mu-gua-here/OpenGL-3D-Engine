@@ -182,21 +182,38 @@ if(PROJECT_HEADERS)
     target_sources(${TARGET_NAME} PRIVATE ${PROJECT_HEADERS})
 endif()
 
-# Collect resources (shaders, models, skyboxes, res/) and mark them as
-# bundle resources for Xcode so they appear in the project navigator.
-file(GLOB_RECURSE RESOURCE_FILES
-    "${CMAKE_SOURCE_DIR}/res/*"
-    "${CMAKE_SOURCE_DIR}/shaders/*"
-    "${CMAKE_SOURCE_DIR}/skyboxes/*"
-    "${CMAKE_SOURCE_DIR}/scene_models/*"
+# Collect resources (shaders, models, skyboxes, res/) and preserve
+# on-disk directory structure in the Xcode project and app bundle.
+file(GLOB_RECURSE RESOURCE_FILES_REL RELATIVE ${CMAKE_SOURCE_DIR}
+    "res/*"
+    "shaders/*"
+    "skyboxes/*"
+    "scene_models/*"
 )
-if(RESOURCE_FILES)
+set(RESOURCE_FULL_PATHS)
+foreach(_rel IN LISTS RESOURCE_FILES_REL)
+    list(APPEND RESOURCE_FULL_PATHS "${CMAKE_SOURCE_DIR}/${_rel}")
+endforeach()
+
+if(RESOURCE_FULL_PATHS)
     if(CMAKE_GENERATOR STREQUAL "Xcode")
-        set_source_files_properties(${RESOURCE_FILES} PROPERTIES
-            MACOSX_PACKAGE_LOCATION "Resources"
-        )
+        foreach(_rel IN LISTS RESOURCE_FILES_REL)
+            get_filename_component(_dir "${_rel}" PATH)
+            if(_dir STREQUAL "")
+                set(_mac_loc "Resources")
+            else()
+                string(REPLACE "\\" "/" _dir_unix "${_dir}")
+                set(_mac_loc "Resources/${_dir_unix}")
+            endif()
+            set(_full "${CMAKE_SOURCE_DIR}/${_rel}")
+            set_source_files_properties(${_full} PROPERTIES MACOSX_PACKAGE_LOCATION "${_mac_loc}")
+        endforeach()
     endif()
-    target_sources(${TARGET_NAME} PRIVATE ${RESOURCE_FILES})
+
+    target_sources(${TARGET_NAME} PRIVATE ${RESOURCE_FULL_PATHS})
+
+    # Show them in Xcode/VS grouped by folder structure
+    source_group(TREE ${CMAKE_SOURCE_DIR} PREFIX "Resources" FILES ${RESOURCE_FULL_PATHS})
 endif()
 
 # Organize files into logical groups for IDEs (Xcode/Visual Studio)
