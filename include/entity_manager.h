@@ -60,7 +60,7 @@ private:
     
 public:
     size_t addEntity(Entity&& entity);
-    int findEntity(std::string name);
+    std::optional<size_t> findEntity(std::string name);
     bool updateEntity(std::string name, const glm::vec3& pos, const glm::vec3& rot, const glm::vec3& scale);
     void updateEntity(size_t index, const glm::vec3& pos, const glm::vec3& rot, const glm::vec3& scale);
     size_t size() const;

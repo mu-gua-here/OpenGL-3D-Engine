@@ -241,7 +241,7 @@ void Renderer::renderDepthPrepass() {
                         matrices.data());
         
         glBindVertexArray(mesh->VAO);
-        glDrawElementsInstanced(GL_TRIANGLES, mesh->INDEX_COUNT, GL_UNSIGNED_INT, 0, matrices.size());
+        glDrawElementsInstanced(GL_TRIANGLES, mesh->INDEX_COUNT, GL_UNSIGNED_INT, 0, static_cast<GLsizei>(matrices.size()));
     }
     glBindVertexArray(0);
     
@@ -314,9 +314,6 @@ void Renderer::renderShadowPass(EntityManager& entity_manager, const Light& ligh
     shadow_shader->use();
     shadow_shader->setMat4("lightSpaceMatrix", lightSpaceMatrix);
 
-    // Note: Don't frustum cull for shadows - objects outside camera view can cast visible shadows
-    // These cutoff values are used only for maximum distance culling, not visibility testing
-
     // Batch shadow rendering by mesh
     std::unordered_map<Mesh*, std::vector<glm::mat4>> shadowBatches;
     
@@ -333,9 +330,6 @@ void Renderer::renderShadowPass(EntityManager& entity_manager, const Light& ligh
         }
         if (is_light_entity) continue;
 
-        float radius = glm::length(entity->scale) * 5.0f;
-        // Don't frustum cull for shadows - objects outside camera view can cast visible shadows
-        // Only do distance-based culling for performance
         float distance = glm::length(global_camera.position - entity->position);
         if (distance > 200.0f) continue;  // Skip very distant objects
 
@@ -381,7 +375,7 @@ void Renderer::renderShadowPass(EntityManager& entity_manager, const Light& ligh
         glBufferData(GL_ARRAY_BUFFER, matrices.size() * sizeof(glm::mat4), matrices.data(), GL_DYNAMIC_DRAW);
 
         glBindVertexArray(mesh->VAO);
-        glDrawElementsInstanced(GL_TRIANGLES, mesh->INDEX_COUNT, GL_UNSIGNED_INT, 0, matrices.size());
+        glDrawElementsInstanced(GL_TRIANGLES, mesh->INDEX_COUNT, GL_UNSIGNED_INT, 0, static_cast<GLsizei>(matrices.size()));
     }
 
     glBindVertexArray(0);
@@ -438,7 +432,7 @@ void Renderer::renderInstancedMesh(Mesh* mesh, const std::vector<glm::mat4>& mat
     // Draw instanced
     glBindVertexArray(mesh->VAO);
     glDrawElementsInstanced(GL_TRIANGLES, mesh->INDEX_COUNT, 
-                           GL_UNSIGNED_INT, 0, matrices.size());
+                           GL_UNSIGNED_INT, 0, static_cast<GLsizei>(matrices.size()));
     glBindVertexArray(0);
 }
 
@@ -481,7 +475,7 @@ void Renderer::renderUnlitMesh(Mesh* mesh, const std::vector<glm::mat4>& matrice
     
     // Draw instanced
     glBindVertexArray(mesh->VAO);
-    glDrawElementsInstanced(GL_TRIANGLES, mesh->INDEX_COUNT, GL_UNSIGNED_INT, 0, matrices.size());
+    glDrawElementsInstanced(GL_TRIANGLES, mesh->INDEX_COUNT, GL_UNSIGNED_INT, 0, static_cast<GLsizei>(matrices.size()));
     glBindVertexArray(0);
 }
 

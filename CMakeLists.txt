@@ -11,7 +11,10 @@ if(DEFINED ENV{EMSCRIPTEN})
     set(CMAKE_OSX_SYSROOT "" CACHE STRING "" FORCE)
 endif()
 
-project(OpenGL-3D-Engine LANGUAGES C CXX)
+project(OpenGL3DEngine LANGUAGES C CXX)
+
+# Clean name for target and output
+set(TARGET_NAME OpenGL-3D-Engine)
 
 # Basic settings
 set(CMAKE_CXX_STANDARD 17)
@@ -46,7 +49,7 @@ elseif(NOT EMSCRIPTEN)
 endif()
 
 # Output directories
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/$<CONFIG>")
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
 
@@ -54,7 +57,7 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
 # EXECUTABLE
 # ============================================================================
 
-add_executable(${PROJECT_NAME}
+add_executable(${TARGET_NAME}
     src/main.cpp
     src/shader_loading.cpp
     src/material.cpp
@@ -78,8 +81,16 @@ add_executable(${PROJECT_NAME}
     lib/imgui/imgui_impl_opengl3.cpp
 )
 
+if(NOT EMSCRIPTEN)
+    # Native builds: use GLAD as the loader for the ImGui OpenGL3 backend
+    target_compile_definitions(${TARGET_NAME} PRIVATE IMGUI_IMPL_OPENGL_LOADER_GLAD)
+else()
+    # Web builds: use the GLES path (GLAD isn’t used with Emscripten)
+    target_compile_definitions(${TARGET_NAME} PRIVATE IMGUI_IMPL_OPENGL_ES3)
+endif()
+
 # ============================================================================
-# EMSCRIPTEN CONFIGURATION (after add_executable)
+# EMSCRIPTEN CONFIGURATION
 # ============================================================================
 
 if(EMSCRIPTEN)
@@ -102,10 +113,13 @@ if(EMSCRIPTEN)
     list(APPEND EMSCRIPTEN_LINK_FLAGS "-sNO_DISABLE_EXCEPTION_CATCHING")
     
     string(REPLACE ";" " " EMSCRIPTEN_LINK_FLAGS "${EMSCRIPTEN_LINK_FLAGS}")
-    
-    set_target_properties(${PROJECT_NAME} PROPERTIES
-        LINK_FLAGS "${EMSCRIPTEN_LINK_FLAGS}"
-    )
+
+    set(_ems_flags "")
+    foreach(dir res level realistic_tree instructions_panel cube sphere cone statue plastic_table)
+        list(APPEND _ems_flags "--preload-file \"${CMAKE_SOURCE_DIR}/${dir}@/${dir}\"")
+    endforeach()
+    string(REPLACE ";" " " _ems_flags "${_ems_flags}")
+    set_target_properties(${TARGET_NAME} PROPERTIES LINK_FLAGS "${_ems_flags} -sUSE_GLFW=3 -sFULL_ES3=1 -sALLOW_MEMORY_GROWTH=1 -sWASM=1 -sASSERTIONS=2 -sSAFE_HEAP=1 -sSTACK_OVERFLOW_CHECK=2 -sNO_DISABLE_EXCEPTION_CATCHING")
     
     # Build Assimp from source for Emscripten
     include(FetchContent)
@@ -135,26 +149,82 @@ if(EMSCRIPTEN)
     )
     FetchContent_MakeAvailable(assimp)
     
-    target_link_libraries(${PROJECT_NAME} PRIVATE assimp)
+    target_link_libraries(${TARGET_NAME} PRIVATE assimp)
     
     message(STATUS "✓ Emscripten build configured with Assimp from source")
 endif()
 
 # macOS-specific Info.plist
 if(APPLE AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/Info.plist")
-    target_link_options(${PROJECT_NAME} PRIVATE
+    target_link_options(${TARGET_NAME} PRIVATE
         -Wl,-sectcreate,__TEXT,__info_plist,${CMAKE_CURRENT_SOURCE_DIR}/Info.plist
     )
 endif()
 
 # Include directories
 target_include_directories(
-    ${PROJECT_NAME} PRIVATE 
+    ${TARGET_NAME} PRIVATE 
     include/
     lib/glad/include
     lib/glm
     lib/stb
     lib/imgui
+)
+
+# Collect header files so IDEs (Xcode/VS) show them in the project
+file(GLOB_RECURSE PROJECT_HEADERS
+    "${CMAKE_SOURCE_DIR}/include/*.h"
+    "${CMAKE_SOURCE_DIR}/include/*.hpp"
+    "${CMAKE_SOURCE_DIR}/lib/**/*.h"
+    "${CMAKE_SOURCE_DIR}/lib/**/*.hpp"
+)
+if(PROJECT_HEADERS)
+    target_sources(${TARGET_NAME} PRIVATE ${PROJECT_HEADERS})
+endif()
+
+# Collect resources (shaders, models, skyboxes, res/) and mark them as
+# bundle resources for Xcode so they appear in the project navigator.
+file(GLOB_RECURSE RESOURCE_FILES
+    "${CMAKE_SOURCE_DIR}/res/*"
+    "${CMAKE_SOURCE_DIR}/shaders/*"
+    "${CMAKE_SOURCE_DIR}/skyboxes/*"
+    "${CMAKE_SOURCE_DIR}/scene_models/*"
+)
+if(RESOURCE_FILES)
+    if(CMAKE_GENERATOR STREQUAL "Xcode")
+        set_source_files_properties(${RESOURCE_FILES} PROPERTIES
+            MACOSX_PACKAGE_LOCATION "Resources"
+        )
+    endif()
+    target_sources(${TARGET_NAME} PRIVATE ${RESOURCE_FILES})
+endif()
+
+# Organize files into logical groups for IDEs (Xcode/Visual Studio)
+source_group(TREE ${CMAKE_SOURCE_DIR}/src PREFIX "Sources" FILES
+    src/main.cpp
+    src/shader_loading.cpp
+    src/material.cpp
+    src/filesystem.cpp
+    src/skybox.cpp
+    src/camera.cpp
+    src/texture_loader.cpp
+    src/mesh_loader.cpp
+    src/light.cpp
+    src/entity_manager.cpp
+    src/renderer.cpp
+    src/shadowmap.cpp
+    src/bloom.cpp
+)
+source_group(TREE ${CMAKE_SOURCE_DIR} PREFIX "Headers" FILES ${PROJECT_HEADERS})
+source_group(TREE ${CMAKE_SOURCE_DIR}/lib PREFIX "ThirdParty" FILES
+    lib/glad/src/glad.c
+    lib/imgui/imgui.cpp
+    lib/imgui/imgui_demo.cpp
+    lib/imgui/imgui_draw.cpp
+    lib/imgui/imgui_tables.cpp
+    lib/imgui/imgui_widgets.cpp
+    lib/imgui/imgui_impl_glfw.cpp
+    lib/imgui/imgui_impl_opengl3.cpp
 )
 
 # ============================================================================
@@ -200,17 +270,17 @@ if(NOT EMSCRIPTEN)
     if(USING_SYSTEM_LIBS)
         # Use system libraries
         if(TARGET assimp::assimp)
-            target_link_libraries(${PROJECT_NAME} PRIVATE assimp::assimp)
+            target_link_libraries(${TARGET_NAME} PRIVATE assimp::assimp)
         elseif(ASSIMP_LIBRARIES)
-            target_include_directories(${PROJECT_NAME} PRIVATE ${ASSIMP_INCLUDE_DIRS})
-            target_link_libraries(${PROJECT_NAME} PRIVATE ${ASSIMP_LIBRARIES})
+            target_include_directories(${TARGET_NAME} PRIVATE ${ASSIMP_INCLUDE_DIRS})
+            target_link_libraries(${TARGET_NAME} PRIVATE ${ASSIMP_LIBRARIES})
         endif()
         
         if(TARGET glfw)
-            target_link_libraries(${PROJECT_NAME} PRIVATE glfw)
+            target_link_libraries(${TARGET_NAME} PRIVATE glfw)
         elseif(GLFW_LIBRARIES)
-            target_include_directories(${PROJECT_NAME} PRIVATE ${GLFW_INCLUDE_DIRS})
-            target_link_libraries(${PROJECT_NAME} PRIVATE ${GLFW_LIBRARIES})
+            target_include_directories(${TARGET_NAME} PRIVATE ${GLFW_INCLUDE_DIRS})
+            target_link_libraries(${TARGET_NAME} PRIVATE ${GLFW_LIBRARIES})
         endif()
         
     else()
@@ -249,7 +319,7 @@ if(NOT EMSCRIPTEN)
         set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
         FetchContent_MakeAvailable(assimp)
         
-        target_link_libraries(${PROJECT_NAME} PRIVATE
+        target_link_libraries(${TARGET_NAME} PRIVATE
             glfw
             assimp
         )
@@ -257,17 +327,17 @@ if(NOT EMSCRIPTEN)
     
     # Platform-specific system libraries
     if(APPLE)
-        target_link_libraries(${PROJECT_NAME} PRIVATE
+        target_link_libraries(${TARGET_NAME} PRIVATE
             "-framework OpenGL"
             "-framework Cocoa"
             "-framework IOKit"
             "-framework CoreVideo"
         )
     elseif(WIN32)
-        target_link_libraries(${PROJECT_NAME} PRIVATE opengl32)
+        target_link_libraries(${TARGET_NAME} PRIVATE opengl32)
     else()
         find_package(OpenGL REQUIRED)
-        target_link_libraries(${PROJECT_NAME} PRIVATE 
+        target_link_libraries(${TARGET_NAME} PRIVATE 
             OpenGL::GL
             ${CMAKE_DL_LIBS}
             pthread
@@ -276,15 +346,26 @@ if(NOT EMSCRIPTEN)
 endif()
 
 # Target properties
-set_target_properties(${PROJECT_NAME} PROPERTIES
-    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
-    RUNTIME_OUTPUT_DIRECTORY_DEBUG ${CMAKE_BINARY_DIR}/bin/Debug
-    RUNTIME_OUTPUT_DIRECTORY_RELEASE ${CMAKE_BINARY_DIR}/bin/Release
-    VS_DEBUGGER_WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-)
+if(CMAKE_GENERATOR STREQUAL "Xcode")
+    message(STATUS "Configuring for Xcode")
+    # Xcode-specific properties (e.g., working directory for your scheme)
+    set_target_properties(${TARGET_NAME} PROPERTIES
+        XCODE_SCHEME_WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    )
+elseif(CMAKE_GENERATOR MATCHES "Ninja|Unix Makefiles")
+    message(STATUS "Configuring for Ninja/Makefiles (likely VS Code)")
+    set_target_properties(${TARGET_NAME} PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+        RUNTIME_OUTPUT_DIRECTORY_DEBUG "${CMAKE_BINARY_DIR}/bin/Debug"
+        RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}/bin/Release"
+        VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+        BUILD_RPATH "/opt/homebrew/lib;/usr/local/lib"
+        INSTALL_RPATH "/opt/homebrew/lib;/usr/local/lib"
+    )
+endif()
 
 # Installation rules
-install(TARGETS ${PROJECT_NAME}
+install(TARGETS ${TARGET_NAME}
     BUNDLE DESTINATION .
     RUNTIME DESTINATION .
 )

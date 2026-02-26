@@ -392,7 +392,7 @@ std::vector<std::shared_ptr<Mesh>> loadMesh(const std::string& filepath) {
             for (int i = 0; i < 4; i++) {
                 unsigned int loc = 6 + i;
                 glEnableVertexAttribArray(loc);
-                glVertexAttribPointer(loc, 4, GL_FLOAT, GL_FALSE, matrixSize, (void*)(i * vec4Size));
+                glVertexAttribPointer(loc, 4, GL_FLOAT, GL_FALSE, static_cast<GLsizei>(matrixSize), reinterpret_cast<const void*>(i * vec4Size));
                 glVertexAttribDivisor(loc, 1);
             }
 

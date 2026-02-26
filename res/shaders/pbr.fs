@@ -196,7 +196,7 @@ void main() {
         float alpha = texture(albedoMap, uv).a;
         if (alpha < 0.5) discard;
     }
-
+    
     vec3 Vworld = normalize(viewPos - FragPos);
     float distToCam = length(viewPos - FragPos);
     
@@ -293,6 +293,6 @@ void main() {
         float fogFactor = clamp((fogEnd - distance) / (fogEnd - fogStart), 0.0, 1.0);
         color = mix(fogColor, color, fogFactor);
     }
-
+    
     FragColor = vec4(color, 1.0);
 }

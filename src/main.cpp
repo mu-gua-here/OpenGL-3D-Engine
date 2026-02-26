@@ -23,6 +23,7 @@
  BUGS & IMPROVEMENTS LIST
  1. Fix ImGui window mouse interaction
  2. Fix up Enscripten build and test on Web
+ 3. 6 instangces of memory leakage from malloc and stuff from Xcode profiling, fix soon
 
  NOTES FOR OTHER DEVELOPERS
  1. If you try to export the textures here elsewhere it might look strange because I'd flipped the textures for them to work in OpenGL
@@ -482,11 +483,11 @@ void emscripten_main_loop_callback() {
             ImGui::RadioButton("High", &renderer->renderDetailLevel, Renderer::HIGH);
             ImGui::RadioButton("Medium", &renderer->renderDetailLevel, Renderer::MEDIUM);
             ImGui::RadioButton("Low", &renderer->renderDetailLevel, Renderer::LOW);
-            ImGui::Checkbox("Enable Bloom", &renderer->bloomEnabled);
+            ImGui::Checkbox("Bloom", &renderer->bloomEnabled);
             ImGui::SliderFloat("Bloom intensity", &renderer->bloomIntensity,
                             0.0f, 2.0f, "%.2f");
 
-            ImGui::Checkbox("Enable Fog", &renderer->fogEnabled);
+            ImGui::Checkbox("Fog", &renderer->fogEnabled);
             ImGui::ColorEdit3("Fog color", (float*)&renderer->fogColor);
             ImGui::SliderFloat("Fog start", &renderer->fogStart,
                             0.0f, 200.0f);
@@ -496,8 +497,8 @@ void emscripten_main_loop_callback() {
                 renderer->fogEnd = renderer->fogStart + 1.0f; // Ensure end is always greater than start
             }
             ImGui::Checkbox("Depth Prepass", &renderer->depthPrepassEnabled);
-            if (ImGui::Button("V-Sync ON")) glfwSwapInterval(1);
-            if (ImGui::Button("V-Sync OFF")) glfwSwapInterval(0);
+            ImGui::Checkbox("V-Sync", &renderer->vsyncEnabled);
+            glfwSwapInterval(renderer->vsyncEnabled ? 1 : 0);
         #else
             ImGui::Text("(GPU timing disabled on Web)");
         #endif
@@ -762,8 +763,8 @@ int main() {
     // CREATE ENTITIES //
     
     createEntity("level", {{1000.0f, level_mesh}}, glm::vec3(0, 0, 0), glm::vec3(0, 0, 0), glm::vec3(100, 100, 100), {CULL_NONE});
-    for (int i = 0; i < 5; i++) {
-        for (int j = 0; j < 5; j++) {
+    for (int i = 0; i < 10; i++) {
+        for (int j = 0; j < 10; j++) {
             createEntity("tree",
             {
                 {25.0f, tree_mesh},
@@ -776,6 +777,7 @@ int main() {
             {CULL_BACK, CULL_NONE});
         }
     }
+    /*
     createEntity("instructions", {{1000.0f, instructions_mesh}}, glm::vec3(0, 2, 4), glm::vec3(0, 0, 0), glm::vec3(1, 1, 1), {CULL_NONE});
     createEntity("cube", {{1000.0f, cube_mesh}}, glm::vec3(5, 3, 0), glm::vec3(0, 0, 0), glm::vec3(1, 1, 1), {CULL_BACK});
     createEntity("sphere", {{1000.0f, sphere_mesh}}, glm::vec3(0, 2, -5), glm::vec3(0, 0, 0), glm::vec3(1, 1, 1), {CULL_BACK});
@@ -791,6 +793,7 @@ int main() {
     {CULL_BACK});
     createEntity("plastic_table", {{1000.0f, plastic_table}}, glm::vec3(-5, 0, -4), glm::vec3(0, 0, 0), glm::vec3(0.5, 0.5, 0.5), {CULL_BACK});
     // createEntity("character_idle", {{1000.0f, character_idle}}, glm::vec3(5, 0, 5), glm::vec3(0, 0, 0), glm::vec3(0.1, 0.1, 0.1), {CULL_BACK});
+    */
 
     printf("Active entities: %zu\n", entity_manager.size());
     
@@ -798,7 +801,7 @@ int main() {
     initialization_complete = true;
     printf("Initialization complete! Engine ready.\n");
     
-    // Reset viewport and framebuffer state (needed to fix slanted scene on startup)
+    // Reset viewport and framebuffer state
     int fb_width, fb_height;
     glfwGetFramebufferSize(window, &fb_width, &fb_height);
     glViewport(0, 0, fb_width, fb_height);

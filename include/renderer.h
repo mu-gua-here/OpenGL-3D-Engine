@@ -39,7 +39,8 @@ public:
 
     int renderDetailLevel = HIGH;
 
-    bool depthPrepassEnabled = false;
+    bool depthPrepassEnabled = true;
+    bool vsyncEnabled = true;
 
     // MSAA buffers
     GLuint msaaFBO = 0;          // Framebuffer to store MSAA pixel data

@@ -11,18 +11,19 @@ size_t EntityManager::addEntity(Entity&& entity) {
     return entities.size() - 1;
 }
 
-int EntityManager::findEntity(std::string name) {
-    for (size_t i = 0; i < entities.size(); i++) {
+std::optional<size_t> EntityManager::findEntity(std::string name) {
+    for (size_t i = 0; i < entities.size(); ++i) {
         if (entities[i].active && entities[i].name == name) {
             return i;
         }
     }
-    return -1;
+    return std::nullopt;
 }
 
 bool EntityManager::updateEntity(std::string name, const glm::vec3& pos, const glm::vec3& rot, const glm::vec3& scale) {
-    int i = findEntity(name);
-    if (i == -1) return false;
+    auto idxOpt = findEntity(name);
+    if (!idxOpt.has_value()) return false;
+    const size_t i = *idxOpt;
 
     const float NO_CHANGE = std::numeric_limits<float>::max();
 

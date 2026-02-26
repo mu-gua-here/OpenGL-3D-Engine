@@ -1,6 +1,8 @@
 #include "light.h"
 #include <cstdio>
 #include <glm/gtx/euler_angles.hpp>
+#include <optional>
+#include <cmath>
 
 std::vector<Light> lights;
 
@@ -99,30 +101,33 @@ void createPointLight(std::string name, const std::vector<std::pair<float, std::
 }
 
 void updateLight(std::string name, glm::vec3 position, glm::vec3 color, int intensity, glm::vec3 rotation) {
-    int lightIndex = -1;
-    for (size_t i = 0; i < lights.size(); i++) {
+    std::optional<size_t> lightIndex;
+    for (size_t i = 0; i < lights.size(); ++i) {
         if (lights[i].entity_name == name) {
             lightIndex = i;
             break;
         }
     }
-    
-    if (lightIndex == -1) {
+
+    if (!lightIndex.has_value()) {
         printf("Warning: Light '%s' not found\n", name.c_str());
         return;
     }
     
-    if (!isnan(position.x)) lights[lightIndex].position.x = position.x;
-    if (!isnan(position.y)) lights[lightIndex].position.y = position.y;
-    if (!isnan(position.z)) lights[lightIndex].position.z = position.z;
+    const size_t idx = *lightIndex;
+        
+    if (!std::isnan(position.x)) lights[idx].position.x = position.x;
+    if (!std::isnan(position.y)) lights[idx].position.y = position.y;
+    if (!std::isnan(position.z)) lights[idx].position.z = position.z;
     
-    if (!isnan(color.r)) lights[lightIndex].color.r = color.r;
-    if (!isnan(color.g)) lights[lightIndex].color.g = color.g;
-    if (!isnan(color.b)) lights[lightIndex].color.b = color.b;
+    if (!std::isnan(color.r)) lights[idx].color.r = color.r;
+    if (!std::isnan(color.g)) lights[idx].color.g = color.g;
+    if (!std::isnan(color.b)) lights[idx].color.b = color.b;
     
-    if (intensity >= 0) lights[lightIndex].intensity = intensity;
+    if (intensity >= 0) lights[idx].intensity = intensity;
 
-    if (!isnan(rotation.x) && !isnan(rotation.y) && !isnan(rotation.z)) {
-        lights[lightIndex].direction = glm::normalize(rotation);
+    if (!std::isnan(rotation.x) && !std::isnan(rotation.y) && !std::isnan(rotation.z)) {
+        lights[idx].direction = glm::normalize(rotation);
     }
 }
+
