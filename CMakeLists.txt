@@ -210,7 +210,11 @@ if(RESOURCE_FULL_PATHS)
         endforeach()
     endif()
 
-    target_sources(${TARGET_NAME} PRIVATE ${RESOURCE_FULL_PATHS})
+    # Only add resource files as sources for Xcode (for bundling) or Emscripten (for preloading)
+    # For other generators like Ninja, these are runtime-loaded files, not sources
+    if(CMAKE_GENERATOR STREQUAL "Xcode" OR EMSCRIPTEN)
+        target_sources(${TARGET_NAME} PRIVATE ${RESOURCE_FULL_PATHS})
+    endif()
 
     # Show them in Xcode/VS grouped by folder structure
     source_group(TREE ${CMAKE_SOURCE_DIR} PREFIX "Resources" FILES ${RESOURCE_FULL_PATHS})
