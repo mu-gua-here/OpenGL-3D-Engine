@@ -57,6 +57,7 @@
 #include <iostream>
 #include <vector>
 #include <map>
+#include <algorithm>
 
 // Function prototypes
 void mouse_callback(GLFWwindow* window, double xpos, double ypos);
@@ -80,6 +81,8 @@ void framebuffer_size_callback(GLFWwindow* window, int width, int height);
 #include "shadowmap.h"
 #include "skybox.h"
 #include "bloom.h"
+#include "physics.h"
+#include "object_picking.h"
 
 // ============================================================================
 // GLOBAL VARIABLES
@@ -97,6 +100,14 @@ float update_count = 0;
 float frame_time = 1.0f;
 bool fullscreen = false;
 bool initialization_complete = false;  // Loading state tracker
+
+// Picking/Dragging
+int selectedEntityIndex = -1;
+Entity* selectedEntity = nullptr;
+glm::vec3 dragPlanePoint;
+glm::vec3 dragPlaneNormal;
+bool isDragging = false;
+bool leftButtonHeld = false;
 
 // Others
 bool debug_mode = false;
@@ -266,7 +277,20 @@ void emscripten_main_loop_callback() {
     
     updateFPS(window);
     
+    // Physics update with fixed timestep
+    static float physics_accumulator = 0.0f;
+    const float PHYSICS_DT = 1.0f / 60.0f;  // Fixed 60 Hz physics
+    
     if (!paused) {
+        // Accumulate time for physics
+        physics_accumulator += frame_time;
+        
+        // Run physics steps
+        while (physics_accumulator >= PHYSICS_DT) {
+            physics_world.step(PHYSICS_DT);
+            physics_accumulator -= PHYSICS_DT;
+        }
+        
         float yaw_rad = global_camera.yaw * M_PI / 180.0f;
         float sin_yaw = sinf(yaw_rad);
         float cos_yaw = cosf(yaw_rad);
@@ -321,7 +345,7 @@ void emscripten_main_loop_callback() {
         // ============================================================================
 
         entity_manager.updateEntity("cube", VEC3_NO_CHANGE, glm::vec3(update_count * 0.1f, update_count * 0.1f, update_count * 0.1f), VEC3_NO_CHANGE);
-        entity_manager.updateEntity("sphere", glm::vec3(NO_CHANGE, 2.5f + sinf(update_count * 0.01f), NO_CHANGE), glm::vec3(update_count, 0, 0), VEC3_NO_CHANGE);
+        // entity_manager.updateEntity("sphere", glm::vec3(NO_CHANGE, 2.5f + sinf(update_count * 0.01f), NO_CHANGE), glm::vec3(update_count, 0, 0), VEC3_NO_CHANGE);
         entity_manager.updateEntity("statue", VEC3_NO_CHANGE, glm::vec3(NO_CHANGE, update_count, NO_CHANGE), VEC3_NO_CHANGE);
         entity_manager.updateEntity("instructions", glm::vec3(NO_CHANGE, 2.0f + 0.05f * sinf(update_count * 0.05f), NO_CHANGE), VEC3_NO_CHANGE, VEC3_NO_CHANGE);
         entity_manager.updateEntity("character_idle", VEC3_NO_CHANGE, VEC3_NO_CHANGE, glm::vec3(0, update_count * 0.1f, 0));
@@ -397,17 +421,55 @@ void emscripten_main_loop_callback() {
         prevEscPressed = false;
     }
     
-    // Handle mouse input for locking cursor into game mode
-    // Allow clicking whenever cursor is normal and ImGui doesn't capture the mouse
-    if (glfwGetInputMode(window, GLFW_CURSOR) == GLFW_CURSOR_NORMAL && !ImGui::GetIO().WantCaptureMouse) {
-        if (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS) {
-            firstMouse = true;
-            // Lock cursor to window for gameplay
-            #ifdef __EMSCRIPTEN__
+    // Handle mouse input for locking cursor into game mode or picking
+    if (!ImGui::GetIO().WantCaptureMouse) {
+        bool leftPressed = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
+        
+        if (leftPressed && !leftButtonHeld) {
+            // Left button just pressed - do picking
+            double mouseX, mouseY;
+            glfwGetCursorPos(window, &mouseX, &mouseY);
+            
+            glm::mat4 projection = glm::perspective(glm::radians(global_camera.fov), (float)WINDOW_WIDTH / (float)WINDOW_HEIGHT, 0.1f, 1000.0f);
+            Ray ray = generateRayFromMouse(mouseX, mouseY, global_camera, projection, WINDOW_WIDTH, WINDOW_HEIGHT);
+            
+            Entity* hitEntity = pickEntity(ray, entity_manager, physics_world.getBodies());
+            if (hitEntity) {
+                selectedEntity = hitEntity;
+                selectedEntityIndex = entity_manager.findEntity(hitEntity->name).value();
+                isDragging = true;
+                
+                // Set drag plane: YZ plane at entity's Z position
+                dragPlanePoint = hitEntity->position;
+                dragPlaneNormal = glm::vec3(0, 0, 1);
+                
+                printf("Selected entity: %s\n", hitEntity->name.c_str());
+            } else {
+                firstMouse = true;
                 glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
-            #else
-                glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
-            #endif
+            }
+        } else if (!leftPressed && leftButtonHeld) {
+            // Left button released - stop dragging
+            isDragging = false;
+            selectedEntity = nullptr;
+            selectedEntityIndex = -1;
+        }
+        
+        leftButtonHeld = leftPressed;
+    }
+    
+    // Handle dragging
+    if (isDragging && selectedEntity) {
+        double mouseX, mouseY;
+        glfwGetCursorPos(window, &mouseX, &mouseY);
+        
+        glm::mat4 projection = glm::perspective(glm::radians(global_camera.fov), (float)WINDOW_WIDTH / (float)WINDOW_HEIGHT, 0.1f, 1000.0f);
+        Ray ray = generateRayFromMouse(mouseX, mouseY, global_camera, projection, WINDOW_WIDTH, WINDOW_HEIGHT);
+        
+        float t;
+        if (rayPlaneIntersection(ray, dragPlanePoint, dragPlaneNormal, t)) {
+            glm::vec3 newPos = ray.origin + ray.direction * t;
+            selectedEntity->position = newPos;
         }
     }
     
@@ -499,6 +561,7 @@ void emscripten_main_loop_callback() {
             ImGui::Checkbox("Depth Prepass", &renderer->depthPrepassEnabled);
             ImGui::Checkbox("V-Sync", &renderer->vsyncEnabled);
             glfwSwapInterval(renderer->vsyncEnabled ? 1 : 0);
+            ImGui::Text(isDragging ? "Dragging entity: %s" : "Not dragging", selectedEntity ? selectedEntity->name.c_str() : "None");
         #else
             ImGui::Text("(GPU timing disabled on Web)");
         #endif
@@ -763,6 +826,7 @@ int main() {
     // CREATE ENTITIES //
     
     createEntity("level", {{1000.0f, level_mesh}}, glm::vec3(0, 0, 0), glm::vec3(0, 0, 0), glm::vec3(100, 100, 100), {CULL_NONE});
+    /*
     for (int i = 0; i < 10; i++) {
         for (int j = 0; j < 10; j++) {
             createEntity("tree",
@@ -777,10 +841,11 @@ int main() {
             {CULL_BACK, CULL_NONE});
         }
     }
-    /*
-    createEntity("instructions", {{1000.0f, instructions_mesh}}, glm::vec3(0, 2, 4), glm::vec3(0, 0, 0), glm::vec3(1, 1, 1), {CULL_NONE});
+    */
+    
+    // createEntity("instructions", {{1000.0f, instructions_mesh}}, glm::vec3(0, 2, 4), glm::vec3(0, 0, 0), glm::vec3(1, 1, 1), {CULL_NONE});
     createEntity("cube", {{1000.0f, cube_mesh}}, glm::vec3(5, 3, 0), glm::vec3(0, 0, 0), glm::vec3(1, 1, 1), {CULL_BACK});
-    createEntity("sphere", {{1000.0f, sphere_mesh}}, glm::vec3(0, 2, -5), glm::vec3(0, 0, 0), glm::vec3(1, 1, 1), {CULL_BACK});
+    createEntity("sphere", {{1000.0f, sphere_mesh}}, glm::vec3(0, 5, -5), glm::vec3(0, 0, 0), glm::vec3(1, 1, 1), {CULL_BACK});
     createEntity("statue",
     {
         {25.0f, statue_mesh},
@@ -793,7 +858,12 @@ int main() {
     {CULL_BACK});
     createEntity("plastic_table", {{1000.0f, plastic_table}}, glm::vec3(-5, 0, -4), glm::vec3(0, 0, 0), glm::vec3(0.5, 0.5, 0.5), {CULL_BACK});
     // createEntity("character_idle", {{1000.0f, character_idle}}, glm::vec3(5, 0, 5), glm::vec3(0, 0, 0), glm::vec3(0.1, 0.1, 0.1), {CULL_BACK});
-    */
+
+    // CREATE PHYSICS OBJECTS //
+
+    createPhysicsEntity("sphere", 10.0f, 0.1f,
+                      0.3f, false, true,
+                      std::vector<Collider>{Collider{ColliderType::Sphere, glm::vec3(0.0f), 0.5f}});
 
     printf("Active entities: %zu\n", entity_manager.size());
     

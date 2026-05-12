@@ -107,9 +107,8 @@ float calcShadow(vec4 fragLight, vec3 N, vec3 L, vec3 lightColor) {
         return 1.0;  // No shadow outside frustum
     }
 
-    // Adaptive bias: smaller for distant surfaces (less acne), larger for close surfaces (less peter-panning)
     float cosTheta = max(dot(N, L), 0.0);
-    float bias = mix(0.0002, 0.002, cosTheta);  // Distance-adaptive bias
+    float bias = max(0.00005, 0.001 * (1.0 - cosTheta));
     
     // Get texel size for PCF
     vec2 texelSize = 1.0 / vec2(textureSize(shadowMap, 0));

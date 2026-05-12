@@ -5,15 +5,19 @@
 #include <memory>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/quaternion.hpp>
 #include "mesh.h"
-
 struct Entity {
+    // Basic properties
     std::string name;
     glm::vec3 position;
-    glm::vec3 rotation;
+    glm::quat rotation;
     glm::vec3 scale;
     std::vector<std::shared_ptr<Mesh>> meshes;
     int active;
+
+    // Physics
+    int physics_body_index = -1;
 
     // Dynamic LOD system
     struct LODLevel {
@@ -45,10 +49,9 @@ struct Entity {
     glm::mat4 getModelMatrix(Entity* entity) {
         glm::mat4 model = glm::mat4(1.0f);
         model = glm::translate(model, entity->position);
-        // Apply rotation (using Euler angles to match your update logic)
-        model = glm::rotate(model, glm::radians(entity->rotation.x), glm::vec3(1, 0, 0));
-        model = glm::rotate(model, glm::radians(entity->rotation.y), glm::vec3(0, 1, 0));
-        model = glm::rotate(model, glm::radians(entity->rotation.z), glm::vec3(0, 0, 1));
+        // Apply rotation using quaternion
+        model = model * glm::mat4_cast(entity->rotation);
+        // Scale last (applied first in vertex transformation: scale -> rotate -> translate)
         model = glm::scale(model, entity->scale);
         return model;
     }

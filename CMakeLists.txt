@@ -71,6 +71,8 @@ add_executable(${TARGET_NAME}
     src/renderer.cpp
     src/shadowmap.cpp
     src/bloom.cpp
+    src/physics.cpp
+    src/object_picking.cpp
     lib/glad/src/glad.c
     lib/imgui/imgui.cpp
     lib/imgui/imgui_demo.cpp

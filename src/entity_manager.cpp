@@ -32,10 +32,16 @@ bool EntityManager::updateEntity(std::string name, const glm::vec3& pos, const g
     if (pos.y != NO_CHANGE) entities[i].position.y = pos.y;
     if (pos.z != NO_CHANGE) entities[i].position.z = pos.z;
     
-    // Rotations
-    if (rot.x != NO_CHANGE) entities[i].rotation.x = rot.x;
-    if (rot.y != NO_CHANGE) entities[i].rotation.y = rot.y;
-    if (rot.z != NO_CHANGE) entities[i].rotation.z = rot.z;
+    // Rotations - convert Euler angles to quaternion
+    if (rot.x != NO_CHANGE || rot.y != NO_CHANGE || rot.z != NO_CHANGE) {
+        // If any rotation component is specified, use it; otherwise use 0
+        glm::vec3 eulerAngles(
+            rot.x != NO_CHANGE ? rot.x : 0.0f,
+            rot.y != NO_CHANGE ? rot.y : 0.0f,
+            rot.z != NO_CHANGE ? rot.z : 0.0f
+        );
+        entities[i].rotation = glm::quat(glm::radians(eulerAngles));
+    }
     
     // Scale
     if (scale.x != NO_CHANGE) entities[i].scale.x = scale.x;
@@ -54,10 +60,16 @@ void EntityManager::updateEntity(size_t index, const glm::vec3& pos, const glm::
     if (pos.y != NO_CHANGE) entities[index].position.y = pos.y;
     if (pos.z != NO_CHANGE) entities[index].position.z = pos.z;
     
-    // Rotations
-    if (rot.x != NO_CHANGE) entities[index].rotation.x = rot.x;
-    if (rot.y != NO_CHANGE) entities[index].rotation.y = rot.y;
-    if (rot.z != NO_CHANGE) entities[index].rotation.z = rot.z;
+    // Rotations - convert Euler angles to quaternion (full replacement, not partial)
+    if (rot.x != NO_CHANGE || rot.y != NO_CHANGE || rot.z != NO_CHANGE) {
+        // If any rotation component is specified, use it; otherwise use 0
+        glm::vec3 eulerAngles(
+            rot.x != NO_CHANGE ? rot.x : 0.0f,
+            rot.y != NO_CHANGE ? rot.y : 0.0f,
+            rot.z != NO_CHANGE ? rot.z : 0.0f
+        );
+        entities[index].rotation = glm::quat(glm::radians(eulerAngles));
+    }
     
     // Scale
     if (scale.x != NO_CHANGE) entities[index].scale.x = scale.x;
@@ -80,7 +92,7 @@ void createEntity(std::string name, const std::vector<std::pair<float, std::vect
     Entity entity;
     entity.name = name;
     entity.position = pos;
-    entity.rotation = rotation;
+    entity.rotation = glm::quat(glm::radians(rotation));
     entity.scale = scale;
     entity.active = 1;
     
